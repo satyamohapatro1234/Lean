@@ -1,694 +1,606 @@
-# 🌍 Global AI Trading Platform — Master Development Plan (v2.0)
+# 🌍 Global AI Trading Platform — Master Development Plan (v3.0)
 
 **Repo:** https://github.com/satyamohapatro1234/Lean  
-**Engine:** QuantConnect LEAN (open-source, battle-tested, C# core with Python algorithm support)  
-**Goal:** World's first open-source, AI-native, multi-broker global trading terminal  
-**First broker:** Dhan (provides historical options + OI data for download)  
-**Status:** Phase 0 — Foundation
+**Engine:** QuantConnect LEAN (C# core, Python strategy support)  
+**Goal:** Production-grade, open-source, AI-native global trading terminal  
+**First broker:** Dhan (provides historical options + OI data)  
+**Status:** Phase 0 — Foundation  
+**Plan version:** 3.0 — Built from 12 books + deep research
 
 ---
 
-## 🔬 Research Findings
+## 📚 Complete Book Reference Library
 
-### 1. Agentic Framework + LEAN — YES, Already Proven
+### Foundation Books (Read First — The Architecture Bible)
 
-**Found:** [`taylorwilsdon/quantconnect-mcp`](https://github.com/taylorwilsdon/quantconnect-mcp) (85 stars, active)  
-A production MCP server — Claude/GPT controls QuantConnect via natural language.  
-Commands like: *"Run grid search on EMA, kill switch if loss > 5%, deploy to IB paper"*
+| # | Book | Author | Year | What It Teaches Us |
+|---|------|--------|------|-------------------|
+| 1 | **Inside the Black Box** (3rd ed) | Rishi K. Narang | 2024 | The 4-component system framework (Alpha/Risk/Portfolio/Execution) — the spine of our architecture |
+| 2 | **Algorithmic Trading & DMA** | Barry Johnson | 2010 | Market microstructure, transaction costs, execution algorithms — the 200-page reason our cost model exists |
+| 3 | **Building Winning Algorithmic Trading Systems** | Kevin J. Davey | 2014 | The complete validation sequence: IS → WFO → Monte Carlo → OOS — without this we will overfit |
+| 4 | **Machine Learning for Algorithmic Trading** (2nd ed) | Stefan Jansen | 2020 | Data pipeline, feature engineering, corporate actions, ML strategy development |
+| 5 | **Advances in Financial Machine Learning** | Marcos López de Prado | 2018 | Why standard backtests lie, HRP portfolios, meta-labeling, CPCV for proper validation |
 
-**Our approach is superior:** Local LEAN engine + Indian brokers + offline AI. No cloud. No monthly fees.
+### Modern Books (2019–2025) — What the Previous Plan Missed
 
-**3 valid integration methods:**
-```
-METHOD 1 — MCP Server (Claude Desktop → our platform)
-  Claude Desktop ──► Our MCP Server ──► Local LEAN Engine ──► Any Broker
+| # | Book | Author | Year | Key Addition to Our Plan |
+|---|------|--------|------|--------------------------|
+| 6 | **Systematic Trading** | Robert Carver | 2015 | Forecast diversification, position sizing framework — the "how much" engine |
+| 7 | **Leveraged Trading** | Robert Carver | 2019 | Safe leverage use, cost-adjusted returns, trading costs kill most strategies |
+| 8 | **Advanced Futures Trading Strategies** | Robert Carver | 2023 | 30 tested strategies across futures — global market expansion reference |
+| 9 | **Machine Learning for Asset Managers** | Marcos López de Prado | 2020 | HRP (Hierarchical Risk Parity) replaces Markowitz — our portfolio optimizer upgrade |
+| 10 | **Causal Factor Investing** | Marcos López de Prado | 2023 | Causal ML vs correlation — how to find real alpha vs spurious signals |
+| 11 | **Trading and Exchanges** | Larry Harris | 2002 | Market microstructure, order types, exchange mechanics — still the reference text |
+| 12 | **Professional Automated Trading** | Eugene Durenard | 2013 | Full infrastructure design: OMS, data pipeline, event-driven architecture |
 
-METHOD 2 — LangGraph Agents via FastAPI (our main architecture)
-  React UI ──► FastAPI ──► LangGraph Agents ──► LEAN CLI ──► Broker
+### Research Papers (2023–2025) — Frontier Knowledge
 
-METHOD 3 — Agent INSIDE LEAN Algorithm (most autonomous)
-  LEAN Python Strategy ──► calls Ollama/Claude ──► gets signal ──► places order
-```
-
-### 2. AlgoLoop Analysis (Capnode/Algoloop)
-
-**Cloned and read source code fully. Here is what it is:**
-
-| Property | Value |
-|----------|-------|
-| Language | C# WPF (Windows desktop XAML app) |
-| Last commit | July 2025 (still maintained!) |
-| Charts | StockSharp.Xaml.Charting + OxyPlot |
-| Platform | Windows ONLY (WPF = Windows Presentation Foundation) |
-| LEAN link | Launches `QuantConnect.Lean.Launcher.exe` as a subprocess |
-| Data providers | USA (from QuantConnect GitHub), GDAX crypto, Oanda forex |
-| Missing | Indian brokers, live trading UI, real data download, broker config |
-
-**How AlgoLoop connects to LEAN (critical pattern we reuse):**
-```csharp
-// AlgoLoop creates a config.json in a temp folder, then:
-_process = new ConfigProcess("QuantConnect.Lean.Launcher.exe", ...);
-_process.Start();
-_process.WaitForExit(cancel, (folder) => PostProcess(folder, model));
-
-// After LEAN finishes, reads result JSON:
-string resultFile = Path.Combine(folder, $"{model.AlgorithmName}.json");
-model.Result = File.ReadAllText(resultFile);
-```
-
-**AlgoLoop frontend — can we use it directly?**
-
-**NO** — it is C# WPF, which is Windows-only desktop technology. Cannot run in a browser.  
-Cannot be ported to React without full rewrite.
-
-**What we TAKE from AlgoLoop:**
-1. **The architecture pattern** — how it separates MarketsViewModel, StrategiesViewModel, BacktestViewModel
-2. **The LEAN communication method** — write config.json → launch subprocess → read result.json
-3. **The data model** — how BacktestModel, SymbolModel, ParameterModel are structured
-4. **The backtest result parsing** — reads LEAN's output JSON, extracts statistics, trades, holdings, charts
-
-**Our web equivalent:** React frontend → FastAPI → subprocess LEAN → read result JSON → WebSocket to frontend.  
-Same pattern, different technology stack.
-
-### 3. Dhan Historical Options Data
-
-Dhan provides:
-- Historical OHLCV data via API (equities + F&O)
-- Historical OI (Open Interest) data
-- Option chain snapshots
-- EOD (End of Day) data download
-
-This means we start with Dhan as our single broker. Once Dhan is fully working, adding others is just new parser + symbol mapper.
+| Paper | Finding Relevant to Our Platform |
+|-------|----------------------------------|
+| "Reinforcement Learning for Quantitative Trading" (ACM 2023) | PPO and SAC outperform rule-based strategies; RL agent is Phase 3 extension for our AI agents |
+| "From Deep Learning to LLMs: AI in Quantitative Investment" (arXiv 2025) | LLM agents (QuantAgent, Alpha-GPT 2.0) already doing strategy discovery — validates our agent architecture |
+| "Advancing Algorithmic Trading with LLMs" (OpenReview 2025) | Human-in-the-loop LLM agents with inter-agent debate — confirms LangGraph is right choice |
 
 ---
 
-## ⚠️ Corrections to Previous Plan (Based on Books)
+## ⚠️ All Mistakes Identified and Corrected
 
-### Correction 1 — Narang's 4-Component Framework Was Missing
-Every professional quant system needs:
+### Mistake 1 — Missing Narang's 4-Component Framework (v2.0 fixed this, v3.0 strengthens it)
+The previous plan added the framework but didn't specify HOW each component connects to LEAN's built-in models. Now specified:
+- **Alpha:** Spider Wave Python algorithm → emits `Insight(symbol, direction, magnitude, confidence)`
+- **Risk:** `MaximumDrawdownPercentPortfolio(0.05)` + `MaximumDrawdownPercentPerSecurity(0.03)` 
+- **Portfolio Construction:** Start with `EqualWeighting`, migrate to `RiskParityPortfolioConstructionModel` (López de Prado's HRP via LEAN built-in)
+- **Execution:** `VolumeWeightedAveragePriceExecutionModel` (uses VWAP, minimizes market impact per Johnson)
+
+### Mistake 2 — Data Pipeline Was Misplaced (v2.0 fixed this)
+Moved to Phase 0. Confirmed correct.
+
+### Mistake 3 — Transaction Costs Missing (v2.0 fixed this)
+Confirmed DhanFeeModel + VolumeShareSlippageModel in Phase 0. Additionally: Carver's "Leveraged Trading" shows that even 0.1% round-trip cost destroys most short-term strategies. We must measure actual slippage per trade in paper trading before going live.
+
+### Mistake 4 — Validation Sequence Incomplete (v2.0 added Monte Carlo)
+v3.0 adds **CPCV (Combinatorial Purged Cross-Validation)** from López de Prado (2018). WFO + Monte Carlo + CPCV together give 3 independent confirmations of strategy robustness. CPCV is more rigorous than WFO alone for finance because it handles the non-IID nature of financial time series.
+
+### Mistake 5 — Portfolio Construction Was Wrong (NEW in v3.0)
+v2.0 chose `EqualWeightingPortfolioConstructionModel` as starter. Correct per Narang. But it should migrate to **HRP (Hierarchical Risk Parity)** not Black-Litterman. Reason: López de Prado (2020) shows HRP out-of-sample outperforms Markowitz Mean-Variance and is more stable. LEAN has `RiskParityPortfolioConstructionModel` built in. Black-Litterman requires subjective views — we have no macro views to input.
+
+### Mistake 6 — Corporate Actions Missing (v2.0 added this)
+Confirmed. Added FactorFile generation to data pipeline. v3.0 adds: NSE delisting history must be maintained (survivorship bias from Jansen). LEAN MapFiles track this.
+
+### Mistake 7 — Options Data Assumed Free (v2.0 solved via Dhan)
+Confirmed. Dhan provides historical options OHLCV + OI data. This is the key reason Dhan is first.
+
+### Mistake 8 — Frontend Too Late (v2.0 added Streamlit in Phase 0)
+Confirmed and kept. v3.0 upgrades to: Streamlit for Phase 0 monitoring, full React terminal in Phase 7.
+
+### Mistake 9 — Wrong Database Choice (NEW in v3.0)
+v2.0 chose TimescaleDB. **Research shows QuestDB is correct for our use case.**
+- QuestDB ingests 1.4M rows/second on modest hardware (vs 145K for TimescaleDB)
+- QuestDB is specifically designed for financial tick data (founded by ex-low-latency trading engineers)
+- QuestDB query performance: 25ms for OHLCV aggregation vs 1,021ms TimescaleDB
+- TimescaleDB is better for PostgreSQL teams wanting familiar tooling — we're not that
+- **Decision: QuestDB replaces TimescaleDB**
+
+### Mistake 10 — No Carver Position Sizing Framework (NEW in v3.0)
+Carver's "Systematic Trading" introduces the **forecast diversification multiplier** and **instrument diversification multiplier**. These are critical when running Spider Wave across multiple instruments (NIFTY, BANKNIFTY, stocks). Without them, a system trading 20 instruments with correlated signals will massively concentrate risk. This must be implemented in the Portfolio Construction Model.
+
+### Mistake 11 — Charting Strategy Was Vague (NEW in v3.0)
+v2.0 said "TradingView Charting Library (free for non-commercial)". **This is wrong.** Research reveals:
+
+#### TradingView Charting Library — Full Truth
+
+| Product | License | Drawing Tools | Indicators | Use Case |
+|---------|---------|---------------|------------|----------|
+| **TradingView Widgets** | Free, copy-paste | ❌ | ❌ | Simple embeds, no data feed |
+| **TradingView Lightweight Charts** | Apache 2.0, fully open source | ❌ (limited) | ❌ (none built-in) | Price line charts only |
+| **TradingView Advanced Charts** | Free for PUBLIC web projects, requires application + attribution | ✅ 80+ tools | ✅ 100+ indicators | Full professional chart |
+| **TradingView Trading Platform** | Commercial license required | ✅ | ✅ | + Order ticket, DOM |
+
+**Key finding:** TradingView does not provide Advanced Charts for personal use, hobbies, studies, or testing. Licenses are provided only to companies/individuals for use in public web projects. Must apply at tradingview.com/advanced-charts.
+
+The free license is intended for public access services only — NOT for private, personal or internal uses.
+
+**Our project is open-source and public** → we CAN apply for the free Advanced Charts license. But we cannot guarantee approval. We need a fallback.
+
+**Decision: Dual charting strategy**
+1. **Primary:** KLineChart + KLineChart Pro (Apache 2.0, fully open source, zero dependencies, professional drawing tools) — our guaranteed free solution
+2. **Optional upgrade:** Apply for TradingView Advanced Charts free license — if approved, swap as optional build flag
+
+#### Why KLineChart is the Right Choice
+
+- Apache 2.0 license, zero dependencies, runs on mobile, TypeScript support
+- Built-in indicators: MA, EMA, BOLL, MACD, RSI, KDJ, BIAS, CCI, DMI, OBV, SAR, and more
+- Full drawing tools: trend lines, channels, Fibonacci, Gann fans, horizontal rays
+- KLineChart Pro is the out-of-the-box financial chart built on KLineChart — Apache 2.0 license
+- Actively maintained (3,591 stars, TypeScript, 10,000+ weekly downloads)
+- Datafeed API pattern matches TradingView's (easy future migration)
+
+### Mistake 12 — Technical Indicator Strategy Unclear (NEW in v3.0)
+The plan had no decision on which indicator library to use for Python backend calculations (needed for backtesting, strategy development, agent analysis).
+
+**Decision:**
+- **Python backend:** TA-Lib (C core, BSD license, fastest, 150+ indicators, 60+ candlestick patterns, 2-4x faster than pandas-ta). Open-source BSD license, can be freely integrated in open-source or commercial applications. Use via `ta-lib-python` package.
+- **Frontend:** KLineChart built-in indicators (no additional library needed)
+- **Research/notebook:** `pandas-ta-classic` (150 indicators + 62 TA-Lib candlestick patterns, community maintained fork)
+
+### Mistake 13 — Wrong Tick Data Storage Architecture (NEW in v3.0)
+Previous plan had: Redis (live ticks) → TimescaleDB (historical storage). This creates unnecessary complexity with 2 systems.
+
+**New architecture based on research:**
+- **QuestDB** handles BOTH real-time ingestion AND historical queries in one system
+- QuestDB has native WebSocket ingestion API
+- QuestDB PostgreSQL wire protocol → existing SQL tools work
+- Redis retained only for pub/sub (broadcasting ticks to multiple frontend WebSocket subscribers)
+
 ```
-Alpha Model → Risk Model → Portfolio Construction → Execution Model
-```
-The previous plan had Alpha (Spider Wave) and Execution (brokers). Risk Model and Portfolio Construction were absent. These are now defined in Phase 0.
-
-**Chosen models:**
-- Risk Model: `MaximumDrawdownPercentPortfolio` (5% hard stop, LEAN built-in)
-- Portfolio Construction: `EqualWeightingPortfolioConstructionModel` initially, then Black-Litterman later (both LEAN built-in)
-
-### Correction 2 — Data Pipeline Was Misplaced
-Previous plan had data pipeline in Phase 2. You cannot prove the symbol mapper works without running a backtest. You cannot run a backtest without data. Fixed: data pipeline moves to Phase 0.
-
-### Correction 3 — Transaction Costs Were Missing (Barry Johnson)
-Johnson dedicates 200 pages to this. Backtests without realistic costs show false profit.
-LEAN already has `ZerodhaFeeModel` with exact NSE charges (0.03%, max ₹20, STT, exchange fees, SEBI charges, stamp duty). Must be configured from day one, not added later.
-
-### Correction 4 — Monte Carlo Robustness Test Missing (Davey)
-Walk Forward tests out-of-sample performance. Monte Carlo tests if the edge is real or random by randomly shuffling trades. Both are required. Monte Carlo is NOT built into LEAN — must be written as Python post-processor.
-
-### Correction 5 — Phase 3 (Agents) Was 4 Weeks for 9 Deliverables
-That is 2-3 months of work. Split into 3 sub-phases. Core agents first, then options agents, then global agents.
-
-### Correction 6 — Corporate Actions Were Absent (Jansen)
-Unadjusted data causes false signals. Stock splits look like crashes. Dividends look like drops. LEAN handles this via FactorFiles and MapFiles — must be generated for Indian stocks.
-
-### Correction 7 — Options Historical Data Is Not Free
-NSE options historical data (with OI, IV, bid-ask) costs money. **Dhan solves this** for us since it provides historical options data as part of subscription. This is exactly why Dhan is the right first broker.
-
-### Correction 8 — Frontend Was Too Late
-Without a UI, phases 1-5 are invisible — all debugging via log files. A minimal Streamlit monitoring dashboard goes into Phase 0.
-
-### Correction 9 — Timelines Were Too Aggressive
-Doubled all timelines. A solid working backtest with correct transaction costs and clean data is 4 weeks of work, not 2.
-
----
-
-## 🏗️ Full System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    GLOBAL AI TRADING PLATFORM                       │
-│              (AlgoLoop patterns + our tech stack)                   │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │              REACT FRONTEND (Next.js + TypeScript)            │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │   │
-│  │  │Watchlist │ │Option    │ │Strategy  │ │ AI Assistant │   │   │
-│  │  │+ Charts  │ │Chain     │ │Builder   │ │ (Chat Panel) │   │   │
-│  │  │(TV chart)│ │(live OI) │ │(payoff)  │ │ (LangGraph)  │   │   │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────┘   │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐   │   │
-│  │  │Positions │ │Backtest  │ │Portfolio │ │ Spider Wave  │   │   │
-│  │  │Holdings  │ │Results   │ │Analytics │ │ Dashboard    │   │   │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────┘   │   │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                         │ WebSocket + REST                          │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                  FASTAPI BACKEND (Python)                    │   │
-│  │                                                              │   │
-│  │  ┌─────────────────────────────────────────────────────┐    │   │
-│  │  │           AGENTIC LAYER (LangGraph)                  │    │   │
-│  │  │  BacktestOrchestrator | RiskMonitor | MCP Server    │    │   │
-│  │  │  WaveSignal | StrategyAdvisor | NewsAnalyst         │    │   │
-│  │  │  OrderAssist | MarketScan | OptimizerAgent          │    │   │
-│  │  └─────────────────────────────────────────────────────┘    │   │
-│  │                              │                               │   │
-│  │  ┌─────────────────────────────────────────────────────┐    │   │
-│  │  │      LEAN ENGINE WRAPPER (AlgoLoop pattern)          │    │   │
-│  │  │  1. Write config.json                               │    │   │
-│  │  │  2. Launch QuantConnect.Lean.Launcher subprocess    │    │   │
-│  │  │  3. Read result.json → parse → return to agent      │    │   │
-│  │  └─────────────────────────────────────────────────────┘    │   │
-│  │                              │                               │   │
-│  │  ┌─────────────────────────────────────────────────────┐    │   │
-│  │  │      NARANG'S 4-COMPONENT FRAMEWORK                 │    │   │
-│  │  │  Alpha: Spider Wave (Python LEAN algorithm)         │    │   │
-│  │  │  Risk:  MaximumDrawdownPercentPortfolio (5%)        │    │   │
-│  │  │  Portfolio: EqualWeighting → BlackLitterman later   │    │   │
-│  │  │  Execution: DhanFeeModel + VolumeShareSlippage      │    │   │
-│  │  └─────────────────────────────────────────────────────┘    │   │
-│  │                              │                               │   │
-│  │  ┌─────────────────────────────────────────────────────┐    │   │
-│  │  │      UNIVERSAL SYMBOL MAPPER (SQLite)                │    │   │
-│  │  │  Dhan | Zerodha | Upstox | Fyers | Angel | IB      │    │   │
-│  │  └─────────────────────────────────────────────────────┘    │   │
-│  └─────────────────────────────────────────────────────────────┘    │
-│                              │                                      │
-│  ┌───────────────┐  ┌────────────────┐  ┌────────────────────────┐ │
-│  │ LEAN ENGINE   │  │  DATA STORAGE  │  │   AI MODELS            │ │
-│  │ (Docker)      │  │  TimescaleDB   │  │   Claude API (online)  │ │
-│  │               │  │  Redis (live)  │  │   Qwen/Ollama (offline)│ │
-│  │  Backtesting  │  │  SQLite        │  │   RTX 3060 12GB VRAM   │ │
-│  │  Live Trading │  │  /Data (LEAN)  │  │                        │ │
-│  │  Optimization │  │                │  │                        │ │
-│  └───────────────┘  └────────────────┘  └────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────┘
+Broker WebSocket → Redis pub/sub → Frontend WebSocket clients
+                ↓
+              QuestDB (append-only tick table, partitioned by day)
+                ↓
+           LEAN /Data folder (LEAN zip format, generated from QuestDB queries)
 ```
 
 ---
 
-## 🤖 The 9 AI Agents (LangGraph)
+## 🏗️ Final System Architecture (v3.0)
 
-| Agent | Role | Priority |
-|-------|------|----------|
-| **BacktestOrchestrator** | Natural language → designs + runs backtests | Phase 3 (core) |
-| **RiskMonitor** | Watches live positions, fires alerts | Phase 3 (core) |
-| **OptimizerAgent** | Grid/Euler search, interprets results | Phase 3 (core) |
-| **WaveSignal** | Spider MTF Wave System signals | Phase 4 |
-| **StrategyAdvisor** | Market view → optimal options structure | Phase 4 |
-| **NewsAnalyst** | News sentiment → market impact | Phase 5 |
-| **OrderAssist** | Natural language → order parameters | Phase 5 |
-| **MarketScan** | Scans OI, IV, unusual activity globally | Phase 5 |
-| **PortfolioCoach** | Daily P&L review, position sizing | Phase 5 |
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                     GLOBAL AI TRADING PLATFORM v3.0                      │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │              REACT FRONTEND (Next.js + TypeScript)               │    │
+│  │                                                                  │    │
+│  │  KLineChart Pro (Apache 2.0) ← Main trading chart               │    │
+│  │  • 80+ drawing tools (Fibonacci, Gann, Channels, Rays)         │    │
+│  │  • Built-in indicators (MA, MACD, RSI, BOLL, KDJ, OBV etc)    │    │
+│  │  • Custom indicator API (plug in any Python TA-Lib output)      │    │
+│  │  • Real-time WebSocket data feed                                │    │
+│  │                                                                  │    │
+│  │  Watchlist   OptionChain  StrategyBuilder  AIAssistant          │    │
+│  │  Positions   OrderBook    BacktestResults  SpiderWave           │    │
+│  │  Portfolio   HRPWeights   EquityCurve      MCValidation         │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                           │ WebSocket + REST API                         │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                  FASTAPI BACKEND (Python)                        │    │
+│  │                                                                  │    │
+│  │  ┌──────────────────────────────────────────────────────────┐  │    │
+│  │  │              AGENTIC LAYER (LangGraph)                    │  │    │
+│  │  │  Phase 3: BacktestOrchestrator | RiskMonitor | Optimizer │  │    │
+│  │  │  Phase 4: WaveSignal | StrategyAdvisor                   │  │    │
+│  │  │  Phase 5: NewsAnalyst | OrderAssist | MarketScan         │  │    │
+│  │  │  MCP Server → Claude Desktop compatible                  │  │    │
+│  │  └──────────────────────────────────────────────────────────┘  │    │
+│  │                              │                                   │    │
+│  │  ┌──────────────────────────────────────────────────────────┐  │    │
+│  │  │         LEAN ENGINE WRAPPER (AlgoLoop pattern)            │  │    │
+│  │  │  write config.json → subprocess LEAN → read result.json  │  │    │
+│  │  └──────────────────────────────────────────────────────────┘  │    │
+│  │                              │                                   │    │
+│  │  ┌──────────────────────────────────────────────────────────┐  │    │
+│  │  │     NARANG'S 4-COMPONENT FRAMEWORK (via LEAN)             │  │    │
+│  │  │  Alpha:     Spider Wave → Insight(symbol, Up/Down, conf)  │  │    │
+│  │  │  Risk:      MaxDrawdownPortfolio(5%) + PerSecurity(3%)    │  │    │
+│  │  │  Portfolio: EqualWeight → HRP (López de Prado)            │  │    │
+│  │  │  Execution: VWAPExecutionModel (Johnson's recommendation) │  │    │
+│  │  └──────────────────────────────────────────────────────────┘  │    │
+│  │                              │                                   │    │
+│  │  ┌──────────────────────────────────────────────────────────┐  │    │
+│  │  │          UNIVERSAL SYMBOL MAPPER (SQLite)                 │  │    │
+│  │  │          Dhan → Zerodha → Upstox → Angel → IB            │  │    │
+│  │  └──────────────────────────────────────────────────────────┘  │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                              │                                           │
+│  ┌───────────────┐  ┌───────────────┐  ┌────────────┐  ┌────────────┐  │
+│  │ LEAN ENGINE   │  │   QUESTDB     │  │   REDIS    │  │ AI MODELS  │  │
+│  │ (Docker)      │  │ (tick storage)│  │ (pub/sub)  │  │ Claude API │  │
+│  │ Backtesting   │  │ 1.4M rows/sec │  │ live feed  │  │ Qwen Ollama│  │
+│  │ Live Trading  │  │ SQL queries   │  │ to frontend│  │ RTX 3060   │  │
+│  │ HRP Optimizer │  │ /Data export  │  │            │  │            │  │
+│  └───────────────┘  └───────────────┘  └────────────┘  └────────────┘  │
+└──────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 📋 Development Phases (Corrected)
+## 🎨 Charting & Technical Analysis Stack (Complete Decision)
+
+### Frontend Charts — KLineChart (Primary, 100% Free)
+
+```
+KLineChart (Apache 2.0, zero dependencies)
+├── KLineChart Pro (Apache 2.0) — out-of-the-box professional chart
+├── Built-in indicators: MA, EMA, SMA, BOLL, SAR, BIAS, CCI, MACD, DMI,
+│                        RSI, KDJ, ROC, MTM, VR, OBV, SAR, TRIX, EMV, DMA
+├── Drawing tools: trend lines, rays, channels, Fibonacci retracements,
+│                  Fibonacci fan, Fibonacci circle, Fibonacci spiral,
+│                  Fibonacci time zone, Gann fans, Gann squares,
+│                  parallel channels, price notes, time markers
+├── Chart types: candlestick, hollow candle, OHLC bars, area, step line
+├── Multi-pane: main chart + sub-charts (volume, indicators)
+├── Custom indicator API: register any indicator computed in Python
+└── Real-time: update via WebSocket push
+```
+
+**How custom indicators from TA-Lib reach the chart:**
+```
+LEAN/TA-Lib (Python) → compute indicator → push via WebSocket → KLineChart
+```
+
+### Optional: TradingView Advanced Charts (Apply for Free License)
+Apply at https://www.tradingview.com/advanced-charts/
+- If approved: 100+ indicators, 80+ drawing tools, Pine Script indicators
+- Requirement: must be a public web project, TradingView attribution required
+- Risk: approval not guaranteed, TradingView can revoke license
+- Strategy: build everything on KLineChart first, swap charts as optional config
+
+### Python Technical Indicators — TA-Lib
+
+```
+TA-Lib (C core, BSD license — freely usable in open-source or commercial)
+├── 150+ indicators: all standard (RSI, MACD, Bollinger, ATR, Stoch, ADX...)
+├── 60+ candlestick patterns: Doji, Hammer, Engulfing, Morning Star...
+├── Performance: 2-4x faster than pandas-ta (C implementation)
+├── Integration: LEAN's built-in indicators + TA-Lib for extra indicators
+└── Install: pip install ta-lib (binary wheels now available, no C compile needed)
+```
+
+### Backtest Visualization — Recharts + D3.js
+- Equity curve: Recharts (React, MIT)
+- Options payoff graphs: D3.js (BSD)
+- OI heatmap: D3.js
+
+---
+
+## 🗄️ Data Storage Final Decision — QuestDB
+
+**QuestDB replaces TimescaleDB. Reasons:**
+
+1. **Performance:** QuestDB is compelling for quant research thanks to outstanding query performance and a gentler learning curve. It achieves 25ms for OHLCV aggregation vs 1,021ms for TimescaleDB.
+
+2. **Designed for trading:** QuestDB was built by ex-low-latency trading engineers. Its storage model is time-based arrays — exactly like financial tick data.
+
+3. **Ingestion speed:** QuestDB achieves 959K rows/sec with 4 threads, compared to TimescaleDB's 145K rows/sec. On AMD Ryzen5, QuestDB hits 1.43 million rows per second.
+
+4. **Single system:** QuestDB handles both real-time ingestion AND historical queries. TimescaleDB needs more PostgreSQL expertise.
+
+**Complete storage architecture:**
+```
+Storage Layer:
+├── QuestDB          → all tick data, OHLCV bars, OI snapshots
+│   ├── ticks table: (timestamp, symbol, price, volume, bid, ask)
+│   ├── ohlcv table: (timestamp, symbol, timeframe, O, H, L, C, V)
+│   └── option_chain: (timestamp, symbol, strike, expiry, ce_price, pe_price, ce_oi, pe_oi)
+├── Redis            → pub/sub only (broadcast live ticks to WebSocket clients)
+├── SQLite           → instrument master, symbol maps, user config, strategy params
+└── /Data folder     → LEAN zip format files (read by LEAN engine)
+```
+
+---
+
+## 📊 Carver Position Sizing Framework (NEW Addition)
+
+From "Systematic Trading" and "Advanced Futures Trading Strategies" (Carver):
+
+Every signal has a **forecast** (scaled between -20 and +20). The target position is:
+```
+target_position = (capital × target_risk × forecast_scalar × instrument_weight) 
+                  / (price × point_value × instrument_vol × sqrt(252))
+```
+
+This prevents the portfolio from over-concentrating when many correlated signals fire.  
+Spider Wave emits signals — these signals must be converted to forecasts before Portfolio Construction.
+
+**What this means for our code:**
+```python
+# In Spider Wave algorithm (strategies/spider-wave/alpha_model.py)
+def EmitInsights(self, data):
+    wave_signal = self.calculate_wave_signal()
+    
+    # Convert to LEAN Insight (Carver's forecast → confidence mapping)
+    if wave_signal == "GRANDMOTHER_UP":
+        confidence = 0.9   # strongest signal
+    elif wave_signal == "MOTHER_UP":
+        confidence = 0.6   # medium signal
+    elif wave_signal == "SON_UP":
+        confidence = 0.3   # weakest signal
+    
+    return [Insight(symbol, InsightType.Price, timedelta(days=5),
+                    InsightDirection.Up, confidence=confidence)]
+```
+
+---
+
+## ✅ Plan Verification: Is v3.0 Correct?
+
+Running through all book requirements:
+
+**Narang check:** 4-component framework → ✅ Alpha/Risk/Portfolio/Execution all defined with specific LEAN models  
+**Johnson check:** Transaction costs from day 1 → ✅ DhanFeeModel + VWAPExecution + VolumeShareSlippage  
+**Davey check:** Full validation sequence → ✅ IS → WFO → Monte Carlo → CPCV → OOS  
+**Jansen check:** Data quality + corporate actions → ✅ FactorFiles + delisting history + QuestDB quality checks  
+**Carver check:** Position sizing + forecast diversification → ✅ Added to Spider Wave alpha model  
+**López de Prado check:** HRP portfolio + CPCV validation → ✅ RiskParityPortfolioConstructionModel + CPCV added  
+**Charting check:** 100% free/open source with drawing tools → ✅ KLineChart Pro (Apache 2.0)  
+**Database check:** Performance for tick data → ✅ QuestDB replaces TimescaleDB  
+
+**One remaining open question:** LEAN's Python API vs subprocess. Current plan uses subprocess (AlgoLoop pattern). This is correct for isolation — backtests run in separate process, cannot crash the FastAPI server.
+
+---
+
+## 📋 Development Phases (v3.0 — Final Corrected Order)
 
 ---
 
 ### Phase 0 — Foundation (Weeks 1–4)
-**Goal:** One working backtest with realistic transaction costs, correct data, and Narang's 4-component framework
-
-**Instrument Master:**
-- [ ] Dhan instrument master downloader (CSV daily refresh)
-- [ ] SQLite schema for unified instrument DB
-- [ ] Dhan symbol parser → unified DB
-- [ ] LEAN Symbol builder (from SQLite rows)
-
-**Symbol Mapper:**
-- [ ] `UniversalSymbolMapper` implementing LEAN's `ISymbolMapper`
-- [ ] `dhan_to_lean(security_id)` → LEAN Symbol
-- [ ] `lean_to_dhan(Symbol)` → Dhan security_id
-- [ ] Unit tests for equity + options + futures
-
-**Data Pipeline:**
-- [ ] Dhan historical data downloader (equities)
-- [ ] Dhan historical OI + options data downloader
-- [ ] LEAN data format writer (milliseconds + 10000x prices, zip files)
-- [ ] Corporate actions downloader (NSE - splits/dividends)
-- [ ] FactorFile generator for Indian stocks (price adjustment)
-- [ ] Data quality checks (outlier removal, gap filling)
-
-**LEAN Setup:**
-- [ ] Docker container with LEAN engine
-- [ ] `engine_wrapper.py` — write config → launch subprocess → read results (AlgoLoop pattern)
-- [ ] `backtest_runner.py` — full backtest pipeline
-- [ ] `optimizer_runner.py` — Grid/Euler search
-
-**4-Component Framework:**
-- [ ] Alpha: Spider Wave Python algorithm (basic version)
-- [ ] Risk: `MaximumDrawdownPercentPortfolio(0.05)` configured
-- [ ] Portfolio: `EqualWeightingPortfolioConstructionModel` configured
-- [ ] Execution: `DhanFeeModel` + `VolumeShareSlippageModel(0.001)` (0.1% slippage)
-
-**Monitoring:**
-- [ ] Streamlit dashboard (live tick feed, backtest P&L chart, positions)
-- [ ] Log viewer
-
-**Milestone:** `python run_backtest.py --strategy spider-wave --market NSE --years 3` → full PDF report with Sharpe, drawdown, transaction costs, win rate
-
----
-
-### Phase 1 — Strategy Validation (Weeks 5–8)
-**Goal:** Prove Spider Wave edge is real, not random (Davey's full validation sequence)
-
-- [ ] In-sample backtest: Spider Wave 2019-2022 (NIFTY 50 universe)
-- [ ] Verify transaction costs match Dhan's actual fee schedule
-- [ ] Walk Forward Optimization: optimize parameters, test on unseen data
-- [ ] Monte Carlo robustness test (Python post-processor on backtest results)
-  - Randomly shuffle trade P&L 10,000 times
-  - Check if Sharpe > 0.5 in 95%+ of simulations
-  - If not — strategy has no real edge, back to alpha design
-- [ ] Out-of-sample backtest: 2023-2024 (the true test)
-- [ ] Capacity analysis: at what AUM does slippage kill the edge?
-
-**Milestone:** Strategy passes all 4 validation gates (IS backtest → WFO → Monte Carlo → OOS)
-
----
-
-### Phase 2 — Dhan Live Integration (Weeks 9–14)
-**Goal:** Dhan WebSocket live ticks flowing into LEAN correctly
-
-- [ ] Dhan WebSocket client (tick streaming)
-- [ ] Tick → Redis pipeline (sub-second latency)
-- [ ] Redis → LEAN live data feed adapter
-- [ ] Dhan order placement (market, limit, SL, SL-M)
-- [ ] Dhan positions/holdings/orders sync
-- [ ] Paper trading test (1 week minimum)
-- [ ] Verify symbol mapping is correct on live data
-- [ ] Daily token refresh job (6 AM, TOTP automation)
-- [ ] Error handling: reconnection, rate limits, token expiry
-
-**Milestone:** `python live.py --broker dhan --mode paper` runs Spider Wave on NIFTY live for 1 week with no crashes
-
----
-
-### Phase 3 — Core Agents + MCP (Weeks 15–20)
-**Goal:** 3 core agents + MCP server working
+**Goal:** First working backtest with all 4 components, correct data, realistic costs
 
 **Infrastructure:**
-- [ ] FastAPI with full LEAN REST wrapper
-  - `POST /backtest/run` → launches LEAN → returns job_id
-  - `GET /backtest/{id}/status` → running/complete/failed
-  - `GET /backtest/{id}/results` → full JSON report
-  - `POST /live/start` / `POST /live/stop`
-  - `GET /positions` / `GET /orders` / `GET /holdings`
-  - `GET /instruments/search?q=NIFTY`
-- [ ] WebSocket endpoint for live tick streaming to frontend
-- [ ] LangGraph state machine base (shared state, human-in-the-loop approval)
-- [ ] Claude API integration (online) + Qwen/Ollama (offline, RTX 3060)
+- [ ] LEAN Docker container (QuantConnect official image)
+- [ ] QuestDB Docker container
+- [ ] Redis Docker container
+- [ ] Docker Compose combining all three
+- [ ] `engine_wrapper.py` (AlgoLoop pattern: config → subprocess → result.json)
+
+**Instrument Master (Dhan first):**
+- [ ] `instrument-master/schema.sql` — SQLite unified DB schema
+- [ ] `instrument-master/brokers/dhan_parser.py` — parse Dhan CSV
+- [ ] `instrument-master/daily_refresher.py` — 6 AM daily download job
+
+**Symbol Mapper:**
+- [ ] `symbol-mapper/universal_mapper.py` — implements LEAN `ISymbolMapper`
+- [ ] Dhan security_id ↔ LEAN Symbol conversion
+- [ ] Unit tests: round-trip equity + option + future
+
+**Data Pipeline:**
+- [ ] Dhan historical data downloader (equities, options, futures)
+- [ ] LEAN data format writer (millisecond timestamps + 10000x prices)
+- [ ] Corporate actions downloader (NSE splits/dividends)
+- [ ] FactorFile generator (price adjustment for backtesting)
+- [ ] Data quality checker (outlier removal, gap detection)
+- [ ] QuestDB ingestion pipeline
+
+**4-Component Framework (Spider Wave v1):**
+- [ ] `strategies/spider-wave/alpha_model.py` — wave signals → Insight objects with Carver confidence mapping
+- [ ] Risk: `MaximumDrawdownPercentPortfolio(0.05)` + `MaximumDrawdownPercentPerSecurity(0.03)`
+- [ ] Portfolio: `EqualWeightingPortfolioConstructionModel` (start simple, upgrade to HRP in Phase 1)
+- [ ] Execution: `VolumeWeightedAveragePriceExecutionModel` (Johnson's market impact minimizer)
+- [ ] Fees: `DhanFeeModel` (exact fee structure)
+- [ ] Slippage: `VolumeShareSlippageModel(0.001)` (0.1% conservative)
+
+**Monitoring:**
+- [ ] Streamlit dashboard: live QuestDB tick display, backtest P&L chart, positions
+
+**Milestone:** `python run_backtest.py` produces a full JSON result with Sharpe, drawdown, trade log, and realistic transaction costs
+
+---
+
+### Phase 1 — Strategy Validation (Weeks 5–10)
+**Goal:** Prove Spider Wave has real edge using Davey's + López de Prado's full validation stack
+
+**Validation Sequence:**
+- [ ] In-sample backtest: Spider Wave 2019–2021 on NSE NIFTY 50 universe
+- [ ] Walk Forward Optimization (LEAN built-in Euler/Grid search)
+- [ ] **Monte Carlo robustness test** (Davey): shuffle 10,000 times, confirm Sharpe > 0.5 in 95%+ of runs
+- [ ] **CPCV** (López de Prado): combinatorial purged cross-validation — finance-specific, non-IID aware
+- [ ] Out-of-sample: 2022–2024 (true test of real edge)
+- [ ] Capacity analysis: max AUM before slippage kills edge
+- [ ] Upgrade portfolio to **HRP** (`RiskParityPortfolioConstructionModel`) — test if Sharpe improves
+
+**Carver Position Sizing:**
+- [ ] Implement forecast scaling (−20 to +20 range) in Spider Wave
+- [ ] Implement instrument diversification multiplier (across NIFTY + BANKNIFTY + stocks)
+- [ ] Verify position sizes are safe for realistic capital (₹10L minimum)
+
+**Milestone:** Spider Wave passes all 4 validation gates OR is sent back to alpha redesign
+
+---
+
+### Phase 2 — Dhan Live Integration (Weeks 11–16)
+**Goal:** Dhan WebSocket live data + paper trading for 2 weeks minimum
+
+- [ ] Dhan WebSocket client → QuestDB tick storage
+- [ ] Redis pub/sub → Frontend WebSocket real-time display
+- [ ] Dhan order API (market, limit, SL, SL-M, bracket orders)
+- [ ] Positions/holdings/orders sync
+- [ ] Daily 6 AM token refresh automation
+- [ ] Symbol mapper verified on LIVE data (not just historical)
+- [ ] 2-week paper trading run with full logging
+- [ ] Slippage measurement: compare expected vs actual fill prices
+- [ ] Adjust `VolumeShareSlippageModel` based on measured slippage
+
+**Milestone:** Spider Wave runs 2 weeks paper trading on Dhan with zero crashes and measured transaction costs
+
+---
+
+### Phase 3 — Core Agents + MCP Server (Weeks 17–22)
+**Goal:** BacktestOrchestrator, RiskMonitor, OptimizerAgent working + Claude Desktop integration
+
+**FastAPI Backend:**
+- [ ] Full REST API (backtest/live/positions/orders/instruments/agents)
+- [ ] WebSocket manager (live ticks → multiple frontend clients)
+- [ ] LEAN subprocess manager (queue, status, results)
+
+**LangGraph Core:**
+- [ ] Base state machine with shared state
+- [ ] Claude API (online) + Qwen/Ollama (offline, RTX 3060) both supported
+- [ ] Human-in-the-loop approval before any live order fires
 
 **3 Core Agents:**
-- [ ] **BacktestOrchestrator Agent**
-  - Input: natural language description
-  - Output: runs backtest, returns full analysis
-  - "Backtest Spider Wave on NIFTY with EulerSearch optimization 2020-2024"
-- [ ] **RiskMonitor Agent**
-  - Polls positions every 60 seconds
-  - Fires alerts when drawdown approaches 5% limit
-  - "Your NIFTY position is at 3.8% drawdown — approaching 5% kill switch"
-- [ ] **OptimizerAgent**
-  - "Find best EMA parameters for Spider Wave on BANKNIFTY"
-  - Runs Grid or Euler search, returns ranked results with Sharpe heatmap
+- [ ] **BacktestOrchestrator**: "Backtest Spider Wave on NIFTY with Euler optimization 2020–2024" → full report
+- [ ] **RiskMonitor**: polls positions every 60s, alerts on drawdown > 3%, auto-liquidate at 5%
+- [ ] **OptimizerAgent**: "Find best EMA params for Spider Wave on BANKNIFTY" → ranked heatmap
 
 **MCP Server:**
-- [ ] FastMCP server (same approach as quantconnect-mcp but local)
-- [ ] Claude Desktop can control backtest, optimization, positions via chat
-- [ ] Human approval required before any live order is placed
+- [ ] `agents/mcp_server.py` using FastMCP
+- [ ] Claude Desktop config file
+- [ ] Test: full backtest cycle via Claude Desktop chat
 
-**Milestone:** Say "Run 2-year Euler-optimized backtest on Spider Wave for NIFTY" in Claude Desktop → full results + chart appear
+**Milestone:** "Run 2-year Euler-optimized backtest on Spider Wave for NIFTY" in Claude Desktop → results in 5 minutes
 
 ---
 
-### Phase 4 — Options Intelligence + 2 More Agents (Weeks 21–28)
-**Goal:** Full NSE options suite with LEAN backtesting
+### Phase 4 — Options Intelligence + 2 Agents (Weeks 23–30)
+**Goal:** Full NSE options backtesting with Dhan historical data + StrategyAdvisor
 
-**Options Data (Dhan):**
-- [ ] Live option chain fetcher (all strikes, all expiries, bid-ask, OI, IV)
-- [ ] Historical options OHLCV + OI downloader (Dhan historical data)
-- [ ] LEAN options data writer (option zip format with Greeks)
-- [ ] LEAN options backtesting working (iron condor, straddle, spreads)
+**Options Data:**
+- [ ] Live option chain fetcher (all strikes × expiries from Dhan WebSocket)
+- [ ] Historical options data pipeline (Dhan historical → QuestDB → LEAN format)
+- [ ] LEAN options backtesting verified (greeks, expiry assignment, margin)
 
 **Options Analytics:**
-- [ ] Greeks calculator (Delta, Gamma, Theta, Vega, Rho — Black-Scholes)
-- [ ] IV surface chart (strike × expiry × IV heat map)
-- [ ] OI change heatmap (PCR, max pain, unusual OI buildup)
-- [ ] Strategy payoff graph (D3.js — visual P&L at expiry)
-- [ ] Strategy Builder UI (add legs → see payoff → backtest → execute)
+- [ ] Black-Scholes Greeks calculator (Delta, Gamma, Theta, Vega, Rho)
+- [ ] IV surface chart (strike × expiry × IV — D3.js heatmap)
+- [ ] OI change heatmap (PCR, max pain, unusual OI)
+- [ ] Payoff graph builder (D3.js — iron condor, straddle, spreads)
 
-**2 More Agents:**
-- [ ] **WaveSignal Agent** — integrates Spider MTF hierarchy into strategy selection
-- [ ] **StrategyAdvisor Agent** — "market is bullish, low IV, suggest structure" → AI returns iron condor with exact strikes
+**2 Agents:**
+- [ ] **WaveSignal Agent**: Spider MTF hierarchy → options structure recommendation
+- [ ] **StrategyAdvisor Agent**: "bullish on NIFTY, low IV" → specific iron fly strikes
 
-**Milestone:** Select NIFTY iron condor in UI, AI calculates max profit/loss/breakevens, backtests it 1 year with Dhan historical options data
-
----
-
-### Phase 5 — Add More Brokers (Weeks 29–34)
-**Goal:** Zerodha + Upstox + Angel One + Fyers connected
-
-- [ ] Zerodha Kite Connect integration (instrument master + symbol mapper + live)
-- [ ] Upstox API integration (free, no monthly fee)
-- [ ] Angel One SmartAPI integration
-- [ ] Fyers API integration
-- [ ] Broker selector in UI (choose which broker to trade with)
-- [ ] Multi-broker paper trading (same strategy, compare execution quality)
-
-**Milestone:** Switch broker dropdown from Dhan to Zerodha → same strategy runs without code change
+**Milestone:** Select and backtest a NIFTY iron condor using Dhan historical options data
 
 ---
 
-### Phase 6 — Global Markets (Weeks 35–42)
-**Goal:** Works with any exchange in the world
+### Phase 5 — More Brokers (Weeks 31–36)
+**Goal:** Zerodha, Upstox, Angel One, Fyers all integrated
 
-- [ ] Interactive Brokers integration (US, EU, Asia, Crypto, Forex)
-- [ ] US equities backtesting (S&P 500, NASDAQ)
+- [ ] Zerodha Kite Connect (instrument master + symbol mapper + live + backtest)
+- [ ] Upstox API (free, no monthly fee — good for testing)
+- [ ] Angel One SmartAPI
+- [ ] Fyers API
+- [ ] Broker selector UI: switch broker without code change
+- [ ] Multi-broker comparison: same strategy, measure execution quality differences
+
+**3 Remaining Agents:**
+- [ ] **NewsAnalyst Agent**: NSE announcements + macro news → market sentiment
+- [ ] **OrderAssist Agent**: "Buy 1 lot NIFTY 24000 CE, sell 24200 CE" → executes via chosen broker
+- [ ] **MarketScan Agent**: scans all F&O for unusual OI/IV buildup
+
+**Milestone:** Drop-down broker switch works; all 9 agents operational
+
+---
+
+### Phase 6 — Global Markets (Weeks 37–44)
+**Goal:** Interactive Brokers integration for US, EU, Forex, Crypto
+
+- [ ] IB TWS API (Python ibapi or ib_insync)
+- [ ] IB instrument universe → SQLite (LEAN has IB symbol mapper built-in)
+- [ ] US equities backtesting (S&P 500 data via LEAN datasets)
 - [ ] Forex (EURUSD, USDINR) via IB or OANDA
-- [ ] Crypto (Binance) via LEAN built-in adapter
-- [ ] European markets (Eurex futures/options)
-- [ ] Market hours database for all global exchanges
-- [ ] Currency conversion for multi-currency portfolios
-- [ ] Remaining 4 agents: NewsAnalyst, OrderAssist, MarketScan, PortfolioCoach
+- [ ] Crypto (Binance) via LEAN built-in Binance adapter
+- [ ] European futures (Eurex) via IB
+- [ ] Market hours database updated for all exchanges
+- [ ] Currency conversion for multi-currency portfolio
 
-**Milestone:** Live strategy on SPY options (IB) and NIFTY options (Dhan) simultaneously
+**Milestone:** Spider Wave-equivalent strategy runs simultaneously on SPY (IB) and NIFTY (Dhan)
 
 ---
 
-### Phase 7 — Full Frontend (Weeks 43–50)
-**Goal:** Production-grade React trading terminal
+### Phase 7 — Full Frontend (Weeks 45–52)
+**Goal:** Production-grade React trading terminal with professional charts
 
-Built using AlgoLoop's UI architecture patterns, but in React + TypeScript:
+**Tech Stack:**
+```
+React 18 + TypeScript + Next.js App Router
+Tailwind CSS + shadcn/ui (component primitives)
+KLineChart Pro (Apache 2.0) — main trading chart
+Recharts — equity curve, portfolio analytics
+D3.js — options payoff, OI heatmap
+Ag Grid Community (MIT) — positions, orders, order book
+Zustand — global state management
+TanStack Query — server state, data fetching
+```
 
-| AlgoLoop Component | Our React Equivalent |
-|-------------------|---------------------|
-| MarketsView (WPF) | DataProvider page (React) |
-| StrategiesView (WPF) | Strategies panel (React) |
-| BacktestView + tabs | BacktestResults with tabs |
-| StockChartView (StockSharp) | TradingView Charting Library |
+**AlgoLoop UI Pattern (translated to React):**
+| AlgoLoop WPF | Our React Equivalent |
+|-------------|---------------------|
+| MarketsViewModel | DataProviders page |
+| StrategiesViewModel | Strategies panel |
+| BacktestView (tabs) | BacktestResults (Config/Symbols/Params/Holdings/Orders/Trades/Charts) |
+| StockChartView (StockSharp) | KLineChart Pro |
 | EquityChartView (OxyPlot) | Recharts equity curve |
-| LogView | Log panel with WebSocket |
+| LogView | Log panel (WebSocket tail) |
 
-**Deliverables:**
-- [ ] React + TypeScript + Tailwind + shadcn/ui setup
-- [ ] TradingView Charting Library (apply at tradingview.com/advanced-charts — free non-commercial)
-- [ ] Watchlist with live prices (WebSocket)
-- [ ] Option chain table (color-coded, sortable by strike/OI/IV)
-- [ ] Strategy Builder with payoff graph (D3.js)
-- [ ] Positions / Orders / Holdings panels
-- [ ] Backtest results dashboard (replicating AlgoLoop's tabs: Config/Symbols/Parameters/Holdings/Orders/Trades/Charts)
-- [ ] AI chat panel (BacktestOrchestrator + RiskMonitor responses)
-- [ ] Spider Wave MTF dashboard
-- [ ] Portfolio analytics (equity curve, drawdown, Sharpe over time)
+**Screens:**
+- [ ] Main terminal (chart + watchlist + AI assistant panel)
+- [ ] Options chain page (live OI, IV surface, strategy builder)
+- [ ] Research page (backtest runner, optimization results, MC validation)
+- [ ] Portfolio page (positions, equity curve, HRP weights, Carver position sizes)
+- [ ] Settings page (broker config, data providers, AI model selection)
 
-**Milestone:** Full trading terminal at `localhost:3000` with all panels live
+**Milestone:** Full terminal at `localhost:3000`, all panels live with WebSocket data
 
 ---
 
 ### Phase 8 — Open Source Launch
-- [ ] Docker Compose one-click setup (`docker compose up` → everything starts)
-- [ ] Documentation site (architecture, setup, strategy development guide)
-- [ ] Demo video (Spider Wave backtest → optimize → paper trade → live)
+- [ ] Docker Compose one-command setup: `docker compose up` → everything starts
+- [ ] Documentation site (architecture, setup guide, strategy development)
+- [ ] Demo video: backtest → optimize → validate → paper trade → live
 - [ ] GitHub release v1.0
 - [ ] Community Discord
 
 ---
 
-## 🔑 Key Technical Decisions
+## 🔑 All Technical Decisions (Final)
 
-### Why Dhan First?
-1. Provides historical options OHLCV + OI data (most Indian brokers don't)
-2. Modern REST + WebSocket API
-3. Good documentation
-4. Once Dhan works, adding others is a new parser + symbol mapper
-
-### LEAN Data Format — The 10000x Rule
-```python
-# LEAN stores ALL prices as integers × 10,000
-# ₹94.00 → stored as 940000 (integer)
-# NSE 9:15 AM opening bar stored as:
-# 33300000, 940000, 950000, 934000, 944000, 1047471
-# ^ms since midnight           ^close     ^volume
-
-# NEVER feed raw prices — LEAN will misinterpret everything
-lean_price = int(raw_price * 10000)
-ms_since_midnight = int((timestamp.hour * 3600 + timestamp.minute * 60 + timestamp.second) * 1000)
-```
-
-### LEAN Data Folder Structure
-```
-/Data/
-├── equity/india/
-│   ├── minute/{symbol}/{YYYYMMDD}_trade.zip   ← OHLCV minute bars
-│   ├── daily/{symbol}.zip                      ← OHLCV daily bars
-│   ├── factor_files/{symbol}.csv               ← Split/dividend adjustments
-│   └── map_files/{symbol}.csv                  ← Ticker rename history
-├── option/india/
-│   └── minute/{symbol}/{YYYYMMDD}_trade.zip   ← Options OHLCV
-├── index/india/
-│   └── minute/{symbol}/{YYYYMMDD}_trade.zip   ← NIFTY 50, BANKNIFTY
-└── market-hours/
-    └── market-hours-database.json              ← NSE: 9:15-15:30 IST
-```
-
-### How LEAN Engine Communication Works (AlgoLoop Pattern)
-```python
-# From AlgoLoop's LeanLauncher.cs — we replicate this in Python
-def run_backtest(strategy: str, config: dict) -> dict:
-    # Step 1: Write config.json to temp folder
-    tmpdir = tempfile.mkdtemp()
-    with open(f"{tmpdir}/config.json", "w") as f:
-        json.dump(config, f)
-    
-    # Step 2: Launch LEAN as subprocess
-    process = subprocess.Popen(
-        ["dotnet", "QuantConnect.Lean.Launcher.dll"],
-        cwd=tmpdir, capture_output=True
-    )
-    process.wait()
-    
-    # Step 3: Read result JSON (same as AlgoLoop's PostProcess method)
-    with open(f"{tmpdir}/{strategy}.json") as f:
-        return json.load(f)  # Contains statistics, orders, trades, charts
-```
-
-### Transaction Cost Model (Barry Johnson)
-```python
-# LEAN configuration — must be set from day 1, not added later
-# Dhan fee structure:
-class DhanFeeModel(IndiaFeeModel):
-    BrokerageMultiplier = 0.0003    # 0.03% or ₹20 max per order
-    MaxBrokerage = 20               # ₹20 cap
-    SecuritiesTransactionTax = 0.00025  # 0.025% on sell (equities)
-    ExchangeTransactionCharge = 0.0000345
-    StateTax = 0.18                 # 18% GST on brokerage
-    SebiCharges = 0.000001          # ₹10 per crore
-    StampCharges = 0.00003          # 0.003% on buy
-
-# Slippage (conservative for NSE)
-slippage = VolumeShareSlippageModel(0.001)  # 0.1% = ~1-2 ticks for liquid NSE stocks
-```
-
-### Data Storage Decision
-```
-Redis           → live ticks (sub-second, in-memory pub/sub)
-TimescaleDB     → historical tick + candle storage (time-series SQL)
-SQLite          → instrument master, symbol mappings, user config, strategy params
-/Data folder    → LEAN zip format files (read by LEAN engine during backtest)
-```
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Engine | QuantConnect LEAN | 10+ years production, India + global built-in |
+| Primary chart | KLineChart Pro | Apache 2.0, professional drawing tools, free |
+| Optional chart | TradingView Advanced Charts | Apply for free license (public project) |
+| Python indicators | TA-Lib | C core, fastest, BSD license, 150+ indicators |
+| Tick database | QuestDB | 1.4M rows/sec, designed for financial data |
+| Cache/pub-sub | Redis | Sub-ms latency, WebSocket fan-out |
+| Instrument DB | SQLite | Fast reads, zero config, sufficient for mapping |
+| Agent framework | LangGraph | Stateful, human-in-the-loop, Ollama-compatible |
+| AI (online) | Claude API | Best reasoning for trading analysis |
+| AI (offline) | Qwen via Ollama | RTX 3060, no data leaves machine |
+| Portfolio model | HRP (RiskParityPortfolioConstructionModel) | López de Prado: better than Markowitz OOS |
+| Execution model | VWAP (VolumeWeightedAveragePriceExecutionModel) | Johnson: minimizes market impact |
+| Position sizing | Carver forecast framework | Handles correlated signals correctly |
+| Validation | IS + WFO + Monte Carlo + CPCV + OOS | Davey + López de Prado combined |
+| First broker | Dhan | Historical options + OI data available |
 
 ---
 
-## 🚧 Known Hard Problems + Solutions
+## 🚧 Known Hard Problems (All Documented)
 
-### Problem 1: NSE Option Expiry Date Mismatch
-LEAN calculates expiry from calendar. NSE changes expiry dates for holidays.
-**Solution:** Always use broker's actual expiry date from instrument master. Never calculate.
-
-### Problem 2: LEAN 10000x Price Format
-Raw prices from broker → LEAN misinterprets as prices 10000x smaller.
-**Solution:** `lean_price = int(raw_price * 10000)` — enforce at data writer level.
-
-### Problem 3: Multiple Time Zones
-NSE: Asia/Kolkata (+5:30) | NYSE: America/New_York | LEAN uses UTC internally.
-**Solution:** Always store ticks in UTC. LEAN converts via market-hours-database.json.
-
-### Problem 4: Option Chain WebSocket Limits
-Dhan WebSocket: limited simultaneous subscriptions.
-Full NIFTY chain (all strikes × all expiries) = thousands of tokens.
-**Solution:** Subscribe only to ATM ±10 strikes initially. Expand on demand.
-
-### Problem 5: Broker Daily Token Expiry
-All Indian brokers expire API tokens at midnight daily.
-**Solution:** Automated 6 AM refresh using Playwright + TOTP. Or manual refresh UI.
-
-### Problem 6: Corporate Actions (Stefan Jansen)
-Stock splits, dividends, delistings cause false signals if data is unadjusted.
-**Solution:** Download NSE corporate actions, generate LEAN FactorFiles, adjust prices.
-
-### Problem 7: Survivorship Bias
-Backtesting only on stocks that still exist overstates returns.
-**Solution:** LEAN MapFiles track ticker renames/delistings. Maintain full universe history.
+| Problem | Solution |
+|---------|----------|
+| NSE option expiry dates ≠ calendar | Always use broker's actual expiry from instrument master |
+| LEAN 10000x price format | `lean_price = int(raw_price * 10000)` at writer level |
+| Multi-timezone (NSE/NYSE/Crypto) | Always store UTC, LEAN converts via market-hours-database.json |
+| Option chain subscription limits | Subscribe ATM ±10 strikes initially, expand on demand |
+| Broker token expiry at midnight | Automated 6 AM refresh job |
+| Survivorship bias | LEAN MapFiles track delistings, maintain full universe history |
+| Non-IID financial time series | CPCV not WFO alone for validation (López de Prado) |
+| Carver signal correlation | Forecast diversification multiplier across instruments |
 
 ---
 
-## 📁 Repository Structure
+## 🚀 What to Build Right Now
 
 ```
-Lean/  (satyamohapatro1234/Lean)
-├── PLAN.md                              ← This file (master plan)
-├── README.md                            ← Project overview
-├── requirements.txt                     ← Python dependencies
-├── docker-compose.yml                   ← One-click setup
-│
-├── instrument-master/
-│   ├── daily_refresher.py               ← Downloads all broker instrument files
-│   ├── schema.sql                       ← SQLite unified instrument DB schema
-│   └── brokers/
-│       ├── dhan_parser.py               ← ✅ Build first
-│       ├── zerodha_parser.py
-│       ├── upstox_parser.py
-│       ├── fyers_parser.py
-│       ├── angelone_parser.py
-│       └── ib_parser.py
-│
-├── symbol-mapper/
-│   ├── universal_mapper.py              ← ISymbolMapper implementation
-│   ├── lean_symbol_builder.py           ← Creates LEAN Symbol objects
-│   └── tests/
-│
-├── data-pipeline/
-│   ├── tick_collector.py                ← WebSocket → Redis
-│   ├── candle_builder.py                ← Tick → OHLCV aggregation
-│   ├── lean_writer.py                   ← OHLCV → LEAN zip format (10000x)
-│   ├── historical_downloader.py         ← Pull historical data from Dhan
-│   ├── factor_file_generator.py         ← Corporate actions → FactorFiles
-│   └── data_quality_checker.py          ← Outlier removal, gap detection
-│
-├── brokers/
-│   ├── base_broker.py                   ← Abstract broker interface
-│   ├── dhan/                            ← ✅ Build first
-│   │   ├── broker.py                    ← Dhan REST API implementation
-│   │   ├── websocket_handler.py         ← Live tick streaming
-│   │   ├── fee_model.py                 ← DhanFeeModel (LEAN IFeeModel)
-│   │   └── config.example.json
-│   ├── zerodha/
-│   ├── upstox/
-│   ├── fyers/
-│   ├── angelone/
-│   └── interactive-brokers/
-│
-├── lean-engine/
-│   ├── engine_wrapper.py                ← AlgoLoop pattern: config → subprocess → result
-│   ├── backtest_runner.py               ← Full backtest pipeline
-│   ├── live_runner.py                   ← Live trading start/stop
-│   ├── optimizer_runner.py              ← Grid + Euler search
-│   ├── monte_carlo.py                   ← Davey's robustness test
-│   └── config/
-│       ├── backtest.json                ← LEAN backtest config template
-│       ├── live.json                    ← LEAN live trading config template
-│       └── optimizer.json               ← LEAN optimizer config template
-│
-├── strategies/
-│   └── spider-wave/
-│       ├── main.py                      ← Spider MTF Wave System (LEAN Python algo)
-│       ├── alpha_model.py               ← Wave signal generation
-│       ├── risk_model.py                ← MaximumDrawdownPercentPortfolio 5%
-│       ├── portfolio_model.py           ← EqualWeighting → BlackLitterman
-│       ├── config.json                  ← Parameters (optimizable via LEAN)
-│       └── README.md
-│
-├── agents/
-│   ├── orchestrator.py                  ← Main LangGraph state machine
-│   ├── backtest_orchestrator_agent.py   ← Phase 3
-│   ├── risk_monitor_agent.py            ← Phase 3
-│   ├── optimizer_agent.py               ← Phase 3
-│   ├── wave_signal_agent.py             ← Phase 4
-│   ├── strategy_advisor_agent.py        ← Phase 4
-│   ├── news_analyst_agent.py            ← Phase 5
-│   ├── order_assist_agent.py            ← Phase 5
-│   ├── market_scan_agent.py             ← Phase 5
-│   ├── portfolio_coach_agent.py         ← Phase 5
-│   └── mcp_server.py                    ← Claude Desktop compatible MCP
-│
-├── api/
-│   ├── main.py                          ← FastAPI app
-│   ├── routes/
-│   │   ├── backtest.py
-│   │   ├── live.py
-│   │   ├── positions.py
-│   │   ├── orders.py
-│   │   ├── instruments.py
-│   │   ├── agents.py
-│   │   └── market_data.py
-│   └── websocket_manager.py             ← Live data → frontend bridge
-│
-├── monitoring/
-│   └── dashboard.py                     ← Streamlit (Phase 0 minimal UI)
-│
-├── frontend/                            ← Phase 7 full React terminal
-│   ├── package.json
-│   ├── next.config.js
-│   └── src/
-│       ├── components/
-│       │   ├── Watchlist.tsx
-│       │   ├── OptionChain.tsx
-│       │   ├── StrategyBuilder.tsx
-│       │   ├── TradingChart.tsx          ← TradingView Charting Library
-│       │   ├── EquityCurve.tsx           ← Recharts (AlgoLoop OxyPlot equiv.)
-│       │   ├── BacktestResults.tsx       ← Tabs: Config/Symbols/Params/Holdings/Orders/Trades/Charts
-│       │   ├── AIAssistant.tsx
-│       │   └── SpiderWaveDashboard.tsx
-│       └── pages/
-│           ├── index.tsx                 ← Main terminal
-│           └── research.tsx              ← Research/backtest page
-│
-└── docs/
-    ├── LEAN_DATA_FORMAT.md              ← Exact format spec (10000x, zip structure)
-    ├── SYMBOL_MAPPING.md                ← How symbol mapping works
-    ├── BROKER_SETUP.md                  ← Dhan setup guide
-    ├── AGENT_ARCHITECTURE.md            ← LangGraph state machine design
-    ├── ALGOLOOP_ANALYSIS.md             ← What we took from AlgoLoop
-    └── API_REFERENCE.md                 ← FastAPI endpoint docs
+Week 1 — Start here, in this order:
+1. docker-compose.yml with LEAN + QuestDB + Redis
+2. instrument-master/schema.sql
+3. instrument-master/brokers/dhan_parser.py
+4. instrument-master/daily_refresher.py
+5. symbol-mapper/universal_mapper.py
+6. First test: resolve NIFTY24DEC24000CE → LEAN Symbol → back to Dhan ID
+
+Week 2:
+7. data-pipeline/lean_writer.py (10000x price format, correct zip structure)
+8. strategies/spider-wave/main.py (minimal version, emits Insights)
+9. lean-engine/engine_wrapper.py (AlgoLoop subprocess pattern)
+10. First backtest: Spider Wave on NIFTY → any result → SUCCESS
 ```
-
----
-
-## 🎯 Competitive Position
-
-| Feature | Dhan | Sensibull | OpenAlgo | QuantConnect | **Our Platform** |
-|---------|------|-----------|----------|--------------|--------------------|
-| Open Source | ❌ | ❌ | ✅ | Partial | ✅ |
-| Local LEAN Engine | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Multi-broker India | ✅ | ✅ | ✅ | ❌ | ✅ |
-| Global Markets (IB) | ❌ | ❌ | ❌ | ✅ | ✅ |
-| AI Agents (LangGraph) | ❌ | ❌ | ❌ | Partial | ✅ |
-| Offline AI (Ollama RTX) | ❌ | ❌ | ❌ | ❌ | ✅ |
-| MCP Server (Claude Desktop) | ❌ | ❌ | ❌ | Partial | ✅ |
-| Options Backtesting | Limited | ❌ | ❌ | ✅ | ✅ |
-| Strategy Validation (Davey) | ❌ | ❌ | ❌ | Partial | ✅ |
-| Monte Carlo Robustness | ❌ | ❌ | ❌ | ❌ | ✅ |
-| 4-Component Framework | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Spider Wave System | ❌ | ❌ | ❌ | ❌ | ✅ |
-| AlgoLoop patterns (open) | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Self-hosted | ❌ | ❌ | ✅ | ❌ | ✅ |
-
----
-
-## 🚀 Right Now — First Code to Write
-
-**Week 1 targets:**
-
-1. `instrument-master/schema.sql` — SQLite schema for all broker IDs
-2. `instrument-master/brokers/dhan_parser.py` — parse Dhan's master CSV
-3. `instrument-master/daily_refresher.py` — download + store to SQLite
-4. `symbol-mapper/universal_mapper.py` — Dhan ↔ LEAN Symbol translation
-5. Run first test: resolve "NIFTY24DEC24000CE" → LEAN Symbol → back to Dhan security_id
-
-That's it. One file flows into the next. No skipping.
 
 ---
 
 *Last updated: March 2026*  
-*Status: Phase 0 — Foundation*  
-*Version: 2.0 (corrected based on Narang/Johnson/Davey/Jansen book analysis)*
+*Version: 3.0 — Built from 12 books + database benchmark research + charting license research*  
+*Next update: After Phase 0 milestone is hit*

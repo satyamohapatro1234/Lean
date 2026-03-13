@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Environment / secrets
+.env
+.env.local
+config/secrets.json
+brokers/*/credentials.json
+
+# LEAN data (too large for git)
+/Data/
+*.zip
+*.db
+*.sqlite
+
+# Node / Frontend
+node_modules/
+frontend/.next/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+logs/
+
+# Redis dump
+dump.rdb

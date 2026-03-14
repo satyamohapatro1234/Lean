@@ -1,0 +1,36 @@
+name: "🔍 Code Review Request"
+description: "Request security and quality review for a PR"
+title: "[Review] PR #"
+labels: ["review"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Assign to Copilot → Select agent: `code-review`**
+        
+        Use for PRs that contain:
+        - Broker API integration code
+        - Fee calculation or lot size code
+        - Order placement logic
+        - LEAN data format code
+
+  - type: input
+    id: pr_number
+    attributes:
+      label: "PR number to review"
+      placeholder: "123"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: review_areas
+    attributes:
+      label: "Areas that need attention"
+      options:
+        - label: "Security (no hardcoded credentials)"
+        - label: "LEAN price format (10000× integer)"
+        - label: "Fee model correctness (date-aware)"
+        - label: "Lot size correctness (date-aware)"
+        - label: "Order safety (margin check + confirmation)"
+        - label: "Rate limiting (Dhan API limits)"

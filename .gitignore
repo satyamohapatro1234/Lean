@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv311/
 venv/
 *.egg-info/
 dist/
@@ -11,14 +12,28 @@ build/
 # Environment / secrets
 .env
 .env.local
+*.env
 config/secrets.json
-brokers/*/credentials.json
 
-# LEAN data (too large for git)
-/Data/
-*.zip
+# LEAN outputs (large, generated)
+lean-data/
+lean-results/
+
+# LEAN build outputs (generated from dotnet build)
+engine/Lean/**/bin/
+engine/Lean/**/obj/
+
+# SQLite databases (generated at runtime)
 *.db
 *.sqlite
+
+# QuestDB data
+questdb-root/
+
+# Large data files
+*.zip
+*.csv.gz
+*.parquet
 
 # Node / Frontend
 node_modules/
@@ -27,7 +42,7 @@ frontend/out/
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbbs.db
 
 # IDE
 .vscode/
@@ -38,5 +53,5 @@ Thumbs.db
 *.log
 logs/
 
-# Redis dump
+# Redis
 dump.rdb

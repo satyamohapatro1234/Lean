@@ -15,20 +15,37 @@ Reading the books did not just add knowledge. Each book **changed specific decis
 ### Narang — *Inside the Black Box* (2024)
 The most impactful book. Before reading it, the plan had "strategy → execute". After reading it, the architecture has four distinct, separated components. Every line of the architecture diagram traces back to this book. The key insight: without a Risk Model and Portfolio Construction Model, every strategy is just gambling with no position sizing.
 
+**Additional insight applied to the 5-layer agent architecture:**
+- Narang's 4 components map directly to agent layers: Alpha Model → Decision Layer / StrategyPool; Risk Model → Monitor Layer / RiskGuard+RiskAnalyst; Portfolio Construction → Analysis Layer / PortfolioRebalancer; Execution → Execution Layer / OrderAssist.
+- Adding a Supervisor + Research Layer above these gives the complete 5-layer structure.
+
 ### Barry Johnson — *Algorithmic Trading & DMA* (2010)
 Changed the execution model from "place market order" to VWAPExecutionModel. Changed transaction cost estimation from "ignore" to DhanFeeModel with verified slippage. The key finding: most retail traders underestimate transaction costs by 3–5x. A strategy that looks profitable with zero slippage assumption is often unprofitable live.
 
 ### Kevin Davey — *Building Winning Algorithmic Trading Systems* (2014)
 Changed the validation from "backtest shows profit, deploy it" to a five-gate sequence: In-Sample → Walk Forward Optimization → Monte Carlo → Out-of-Sample → Paper Trade → Live. Every gate must be passed before moving to the next. The Monte Carlo test (10,000 random shuffles) is the most important gate because it answers whether the edge is real or lucky.
 
+**Additional insight applied to ValidationPipeline:**
+- JournalAgent records every trade decision and outcome, making the "paper trade" gate fully instrumented. Davey's core insight: a journal is the difference between learning from experience and just experiencing. Every signal, regime label, recommendation, decision, and outcome is queryable.
+
 ### Stefan Jansen — *Machine Learning for Algorithmic Trading* (2020)
 Changed data pipeline from "download OHLCV and use it" to a proper pipeline with corporate action adjustment, survivorship bias prevention via MapFiles, and data quality checks before any strategy touches the numbers. A split-unadjusted price series shows false signals that look exactly like real ones.
+
+**Additional insights applied to FeatureEngineer:**
+- Dollar bars: resample by traded volume (e.g. every ₹1 crore traded) instead of clock time. Dollar bars are more stationary and IID than time bars — better inputs for ML models.
+- Fractional differentiation (López de Prado method, publicised by Jansen): difference a price series by fraction d < 1.0 to achieve stationarity while preserving pricing memory. Applied to price inputs before any ML model training.
+- MDI/MDA feature importance: Mean Decrease Impurity and Mean Decrease Accuracy from random forest, used to prune irrelevant TA features before model fitting. FeatureEngineer runs this and outputs `important_features.json` for each strategy.
 
 ### Marcos López de Prado — *Advances in Financial Machine Learning* (2018)
 Added CPCV (Combinatorial Purged Cross-Validation) to the validation sequence. Changed portfolio model from BlackLitterman to HRP. The key insight: standard walk-forward validation overfits because financial time series is not IID. CPCV is the mathematically correct approach for finance.
 
 ### Robert Carver — *Systematic Trading* (2015) and *Advanced Futures Trading Strategies* (2023)
 Added the forecast scaling framework (−20 to +20) and instrument diversification multiplier to Spider Wave. Without this, running the strategy on 20 correlated NSE stocks over-concentrates risk. Carver also validated the "trading costs kill most strategies" finding — this confirms why accurate fee models from day one are non-negotiable.
+
+**Additional insights applied to PortfolioRebalancer and StrategyRouter:**
+- Buffered target position: hold target ± 3% deadband before trading. Eliminates ~70% of rebalancing trades with almost no impact on risk-adjusted returns.
+- Gradual reweighting: when RegimeDetector changes regime, strategy weights shift 10% per day toward the new target — never an instant hard switch. Prevents whipsaw from noisy regime signals.
+- Instrument Diversification Multiplier: when SpiderWaveAgent and a second strategy both signal the same underlying, StrategyRouter scales combined position down (not up).
 
 ### López de Prado — *Machine Learning for Asset Managers* (2020)
 Changed the portfolio construction model from EqualWeighting to HRP (Hierarchical Risk Parity). LEAN has RiskParityPortfolioConstructionModel built in. Out-of-sample, HRP consistently outperforms Markowitz because it does not require inverting an unstable covariance matrix.
@@ -44,6 +61,13 @@ Added safe leverage calculation to the position sizing module. The formula targe
 
 ### Larry Harris + Durenard — *Professional Automated Trading* (2013)
 Informed the complete OMS (Order Management System) architecture. An order has a lifecycle: Created → Submitted → Pending → Partially Filled → Filled / Rejected / Cancelled. Every state must be tracked and recoverable after system restart.
+
+**Additional insights applied to agent time partitioning:**
+- Durenard's core principle: each agent class has a fixed latency class. Never mix latency classes in the same process.
+- RiskGuard runs event-driven per tick (<200ms), never makes LLM calls. Separate from RiskAnalyst which runs on-demand with full LLM reasoning (seconds to minutes).
+- Research agents (MarketScan, NewsAnalyst, RegulatoryWatcher) run in 6–9 AM pre-market batch only. No LLM calls during market hours.
+- StrategyRouter runs every 60 seconds during market hours — pure Python, no LLM.
+- Heavy batch jobs (ValidationPipeline, FeatureEngineer, OptimizerAgent) run post-market or on-demand only.
 
 ---
 
@@ -76,6 +100,109 @@ Informed the complete OMS (Order Management System) architecture. An order has a
 - Added WebSocket architecture for real-time data to frontend
 - Added component-by-component build order
 
+### v4 → v5 Corrections — Lessons from Step 0.8 First Backtest (2026-03-15)
+
+These were discovered during the first real end-to-end run. Each is a concrete defect found, the fix applied, and where it permanently changes the plan.
+
+#### Correction 1: No Docker → LEAN must be built from source. Architecture diagram updated.
+
+**What happened:** The plan's Layer 2 said "LEAN Docker". Docker is not installed and the project rules say no Docker. The LEAN CLI (`lean backtest`) only runs via Docker — there is no `--no-docker` flag in any version.
+
+**Fix applied:** LEAN engine was cloned to `repos/Lean/` and built from source using `dotnet build`. The Launcher runs as a direct subprocess: `QuantConnect.Lean.Launcher.exe --config=...`. This is the permanent approach for all future backtest runs.
+
+**Plan change:** Replace "LEAN Docker" with "LEAN Launcher (built from source)" in architecture. Every future phase that mentions running a backtest means `QuantConnect.Lean.Launcher.exe`, not `lean backtest`.
+
+#### Correction 2: Python version constraint — LEAN requires Python ≤ 3.11. Document this permanently.
+
+**What happened:** The `.venv` was Python 3.14. LEAN's bundled `pythonnet 2.0.53` calls C-level CPython symbols that were removed in later versions:
+- `PyUnicode_AsUnicode` — removed in Python 3.12
+- `_PyThreadState_UncheckedGet` — removed in Python 3.13
+
+This caused a hard crash at startup. Three Python installs were attempted (3.14, 3.12) before landing on 3.11.
+
+**Fix applied:** Python 3.11.9 installed. New venv `.venv311` created. `PYTHONNET_PYDLL` env var set to `python311.dll` before launching Launcher. `run_backtest.py` sets this automatically.
+
+**Plan change:** All steps that say "use Python venv" must specify `.venv311` for anything that touches LEAN. The main `.venv` (3.14) is only for data pipeline work (downloaders, tests, API). Add to Step 0.1 setup: install Python 3.11 and create `.venv311` with numpy/pandas/scipy/scikit-learn.
+
+#### Correction 3: Daily data timestamp format bug — LEAN requires `YYYYMMDD 00:00`, not bare `YYYYMMDD`.
+
+**What happened:** `bhavcopy_downloader.py` wrote dates as bare integer `YYYYMMDD` (e.g., `20220103`). LEAN's `TradeBar.Reader()` calls `DateTime.Parse()` which rejects this format. All 3313 existing zip files produced `System.FormatException` errors. The backtest ran but loaded zero bars for all symbols.
+
+**Fix applied:**
+1. `bhavcopy_downloader.py` `append_to_staging()` now writes `YYYYMMDD 00:00` format.
+2. All 3313 existing `.zip` files in `lean-data/equity/india/daily/` were rewritten.
+3. All 3313 staging CSVs in `lean-data/_bhavcopy_staging/` were rewritten.
+
+**Plan change:** Add to Step 0.5 (LEAN Data Writer) definition: "All timestamps in daily CSV files must be `YYYYMMDD 00:00` format. Minute files must use milliseconds-since-midnight integer. These are different formats and must not be mixed up." Add a test: `test_lean_format.py::test_daily_timestamp_format` that reads a real zip and asserts ` 00:00` is present.
+
+#### Correction 4: LEAN needs its own reference files inside `data-folder`. Must be seeded at setup.
+
+**What happened:** LEAN expects `symbol-properties-database.csv` and `market-hours-database.json` (and later `map_files/`, `factor_files/`) relative to the configured `data-folder`. We set `data-folder` to `lean-data/` which only had price data. LEAN crashed immediately with `FileNotFoundException`.
+
+**Fix applied:** Copied `symbol-properties-database.csv` and `market-hours-database.json` from `repos/Lean/Data/` into `lean-data/`. This is now a one-time setup step.
+
+**Plan change:** Add to Step 0.1 setup sequence (after LEAN build): copy LEAN static reference data to `lean-data/`. Specifically:
+- `repos/Lean/Data/symbol-properties/symbol-properties-database.csv` → `lean-data/symbol-properties/`
+- `repos/Lean/Data/market-hours/market-hours-database.json` → `lean-data/market-hours/`
+
+When `lean_writer.py` or any future step adds new data types (futures, options), also ensure the corresponding reference files are present.
+
+#### Correction 5: Phase 0 strategy limitations — not bugs, but must be tracked for Phase 1
+
+**Observed results (2022-01-03 → 2024-12-31, 5 Nifty50 stocks, daily resolution):**
+- Sharpe: −0.052 | MaxDD: 18.6% | Net Profit: 0.14% | Orders: 226
+
+**Root causes (all by design at Phase 0, all fixed in Phase 1):**
+
+| Issue | Fix in |
+|---|---|
+| `Resolution.Daily` instead of minute data — VWAP execution model broken on daily bars | Step 1.1 — switch to minute data after intraday pipeline proven |
+| Only 5 stocks, all Nifty50 large-caps (highly correlated) | Step 1.1 — expand to full F&O universe (210 symbols) |
+| `MaximumDrawdownPercentPortfolio(0.05)` fires on normal noise, forces re-entry at worse price | Step 1.3/1.4 — tune via Monte Carlo and CPCV |
+| `Insufficient buying power` margin rejections (seen in log) — HRP over-allocates for margin account | Phase 2.1 — pre-margin check before sizing; fix margin model assumption |
+| SMA 10/30 crossover has eroded edge, especially 2022–2024 choppy/bull regimes | Step 1.6 — Carver forecast scaling, continuous signal −20/+20 |
+| `DefaultBrokerageModel` does not match Dhan's actual margin rules | Phase 2.1 — implement `DhanBrokerageModel` |
+
+#### Correction 6: test infrastructure split — downloader tests need questdb, LEAN tests need .venv311
+
+**What happened:** `questdb==1.1.0` fails to build on Python 3.14 (Cython `.pxi` file missing). Tests that import downloader modules cannot even be collected. Also, `python-dotenv` missing from `.venv` breaks all `brokers/dhan/` test collection.
+
+**Fix applied (partial):** Tests are run with `--ignore` on the broken files for now.
+
+**Fix planned:**
+- Step 0.9 — install `python-dotenv` into `.venv` permanently. Add to `requirements.txt`.
+- Phase 2.1 — fix `questdb` install: either pin to a version that builds on 3.14, or run downloader tests exclusively via `.venv311` where questdb builds cleanly.
+- Add `conftest.py` pytest markers: `@pytest.mark.requires_questdb`, `@pytest.mark.requires_lean` to separate test sets cleanly.
+
+---
+
+### v5 → v6 Corrections — Agent Architecture Research (Cross-referencing all 12 books)
+
+These corrections came from systematically cross-referencing the 12-book library against the original 9-flat-agent plan. Each gap traced to a specific book.
+
+#### Correction 1: No separation between agent layers (Narang gap)
+The original plan had 9 flat agents with no layer ownership. **Fix:** 5-layer architecture (Research, Analysis, Decision, Execution, Monitor). Narang's 4 components map to layers 3–5. Research layer is new (pre-market intelligence gathering). Agents now know which layer they belong to and which latency class they must meet.
+
+#### Correction 2: No automated validation pipeline (Davey gap)
+The original plan had ValidationPipeline as 5 manual steps. **Fix:** ValidationPipeline agent runs all 5 gates in one call and returns a pass/fail verdict. JournalAgent records every trade decision for the "paper trade" gate. Manual steps eliminated.
+
+#### Correction 3: No feature engineering for ML strategies (Jansen gap)
+The original plan used raw OHLCV for ML. **Fix:** FeatureEngineer agent converts to dollar bars, applies fractional differentiation, runs MDI/MDA importance filtering before any ML model training.
+
+#### Correction 4: RiskMonitor conflated 3 different latency classes (Harris/Durenard gap)
+The original RiskMonitor did: (a) event-driven tick monitoring, (b) periodic P&L reporting, (c) deep risk analysis. These have latency requirements of <200ms, 60s, and minutes respectively — they cannot be in the same process. **Fix:** Split into RiskGuard (event-driven, no LLM, <200ms) and RiskAnalyst (on-demand, LLM, deep analysis).
+
+#### Correction 5: No multi-strategy switching or regime detection (Narang/Carver gap)
+The original plan had one strategy (SpiderWave) with no market condition switching. **Fix:** RegimeDetector (HMM on Nifty50 + VIX), StrategyRegistry (SQLite), StrategyRouter (Carver gradual reweighting). Capital shifts between strategies proportional to regime fit × rolling Sharpe.
+
+#### Correction 6: No portfolio rebalancing with tax awareness (Carver/India tax gap)
+The original plan had PortfolioCoach as both advisor and rebalancer, with no tax logic. **Fix:** Split into PortfolioRebalancer (pure algorithm: Carver buffer + CPPI + vol targeting + India LTCG/STCG tax gate — produces a proposal table) and PortfolioCoach (LLM explains the proposal). RebalancerAgent never executes; OrderAssist does after human confirmation.
+
+#### Correction 7: No Supervisor / single entry point (LangGraph gap)
+The original MCP server exposed 3 separate tools. **Fix:** Single `trading_system` MCP tool. Supervisor routes every request internally, masking the 19-agent complexity from the user.
+
+**Result: Agent count 9 flat → 19 in 5 layers. Agent Architecture section added to PLAN.md above Phase 3.**
+
 ---
 
 ## 🏗️ Final System Architecture
@@ -86,18 +213,24 @@ The platform has four distinct layers. They must be built in order. A frontend w
 Layer 1 — Data Foundation
   NSE Bhavcopy → QuestDB (EOD for all 2000+ stocks, 1 file per day)
   Dhan Intraday API → SQLite job queue → QuestDB (rate-limited, resumable)
-  Instrument Master → SQLite (symbol maps, lot sizes, fee schedules)
+  Instrument Master → SQLite (symbol maps, lot sizes, fee schedules, rebalance journal)
   LEAN /Data folder → populated from QuestDB via writer
 
-Layer 2 — Engine
-  LEAN Docker → backtesting engine (subprocess pattern)
-  Narang's 4 components: Spider Wave → Risk → HRP → VWAP
+Layer 2 — Engine (NO Docker — runs natively)
+  LEAN Launcher → repos/Lean/Launcher/bin/Release/QuantConnect.Lean.Launcher.exe
+  Python runtime → .venv311 (Python 3.11) — pythonnet 2.0.53 requires Python <= 3.11
+  Narang's 4 components: StrategyPool → Risk → HRP → VWAP
   Davey's 5-gate validation: IS → WFO → Monte Carlo → CPCV → OOS
+  Multi-strategy: SpiderWave + MeanReversion + Momentum + OptionsIncome (pluggable)
+  RegimeDetector → StrategyRouter → capital allocated per-regime (Carver gradual reweighting)
 
-Layer 3 — Backend API
+Layer 3 — Backend API + Agent System
   FastAPI → REST endpoints for all platform functions
   WebSocket manager → real-time tick distribution
-  LangGraph agents → AI-assisted analysis
+  LangGraph agent system → Supervisor + 19 specialised agents in 5 layers
+  Agent schedule: research 6–9 AM | analysis nightly | NO LLM calls during market hours
+  Memory: SQLite checkpointer (thread + session + long-term + team shared state)
+  MCP server → Claude Desktop integration (single "trading_system" tool via Supervisor)
 
 Layer 4 — Frontend Terminal
   React + TypeScript + Next.js → production trading UI
@@ -119,11 +252,34 @@ Layer 4 — Frontend Terminal
 
 The biggest mistake is building anything visible before the foundation works. Phase 0 has zero frontend. It is entirely about getting data to flow correctly from broker → storage → LEAN engine.
 
-### Step 0.1 — Docker Infrastructure (Day 1–2)
+### Step 0.1 — Local Environment Setup (Day 1–2)
 
-The first thing to build is the Docker environment that every other part of the system depends on. This means writing a single docker-compose.yml that starts LEAN, QuestDB, and Redis together, confirms they can talk to each other, and produces a health check endpoint. Until this exists, nothing else can be tested. The docker-compose must work with a single command: `docker compose up`.
+⚠️ **No Docker** — all services run natively. See `LOCAL_SETUP.md` for step-by-step commands.
 
-LEAN runs in its official Docker image. QuestDB runs in its official image with port 9000 (HTTP), 9009 (InfluxDB Line Protocol for ingestion), and 8812 (PostgreSQL wire for queries). Redis runs on port 6379. All three must be on the same Docker network so they can reach each other by service name.
+The environment setup has these concrete deliverables:
+
+**Services:** QuestDB via `questdb.exe start` (ports 9000/9009/8812), Redis via WSL2 `redis-server` or Memurai (port 6379), LEAN Launcher built from source (no Docker — see below).
+
+**Python versions — two are required:**
+- `.venv` (Python 3.14) — for data pipeline (downloaders, FastAPI, agents, tests that don't touch LEAN)
+- `.venv311` (Python 3.11) — **mandatory for anything that runs LEAN**. LEAN's bundled `pythonnet 2.0.53` requires Python ≤ 3.11. Python 3.12 removed `PyUnicode_AsUnicode`; Python 3.13 removed `_PyThreadState_UncheckedGet`. Both cause hard crashes at LEAN startup. Install Python 3.11.x separately and create `.venv311` with: `py -3.11 -m venv .venv311` then `pip install numpy pandas scipy scikit-learn`.
+
+**LEAN build (one-time):**
+```
+cd repos/Lean
+dotnet build QuantConnect.Lean.sln --configuration Release
+```
+Launcher outputs to `repos/Lean/Launcher/bin/Release/QuantConnect.Lean.Launcher.exe`.
+
+**LEAN reference data (one-time, copy after build):**
+LEAN requires static reference files relative to `data-folder`. After building, copy:
+```
+repos/Lean/Data/symbol-properties/symbol-properties-database.csv  →  lean-data/symbol-properties/
+repos/Lean/Data/market-hours/market-hours-database.json            →  lean-data/market-hours/
+```
+Without these, LEAN crashes immediately with `FileNotFoundException` even before loading any price data.
+
+**`python-dotenv` in `.venv`:** Add `python-dotenv` to `requirements.txt` and install it in `.venv`. Absence of this package causes `brokers/dhan/` module imports to fail, breaking all dhan-related tests at collection time.
 
 ### Step 0.2 — Instrument Master (Day 3–5)
 
@@ -145,11 +301,11 @@ The downloader must be resumable: it checks the local cache before making any HT
 
 The intraday downloader is fundamentally different from the Bhavcopy downloader because it is per-symbol, rate-limited, and must cover a large number of requests. The correct architecture is a SQLite-backed job queue.
 
-The queue creation step builds all jobs upfront. For the initial download, the universe is F&O stocks only (approximately 200 symbols). For each symbol, the 5-year period is split into 85-day windows (Dhan's maximum is 90 days, using 85 is safe). This creates approximately 200 × 20 = 4,000 jobs, each stored as a row in the download_jobs SQLite table with status "pending".
+The queue creation step builds all jobs upfront from mapped NSE EQ underlyings (derived from FnO contracts), not from every derivative contract row. For each underlying, the 5-year period is split into 75-day windows (conservative safety below Dhan's 90-day limit). In current runs this produces roughly 6,000+ jobs for the mapped universe.
 
-The download engine processes these jobs at 8 requests per second (Dhan's max is 20, we use 8 for safety). It uses a token bucket rate limiter so the rate never exceeds this even if some requests complete very quickly. On any HTTP error, the job is retried with exponential backoff. On success, the job is marked "completed" in SQLite and the data is written to QuestDB. 
+The download engine uses a shared token bucket capped at 8 requests per second total (Dhan max is 20, we stay at 8 for safety). It runs with parallel workers so network latency is hidden while still respecting the 8 req/sec cap. On retryable API errors, the job uses bounded exponential backoff. On auth expiry (DH-901), the run stops early to avoid burning the whole queue. On success, the job is marked completed and data is written to QuestDB.
 
-The critical property: if the process crashes or is killed, restarting it reads the SQLite table and continues from the first "pending" or "failed" job. The download never restarts from scratch.
+The critical property: if the process crashes or is killed, restarting it recovers in-progress jobs and resumes from queue state. Failed jobs are retried in later runs without restarting from scratch.
 
 ### Step 0.5 — LEAN Data Writer (Day 13–15)
 
@@ -177,9 +333,22 @@ The fee schedule is versioned: before October 1, 2024 uses old STT rates; after 
 
 ### Step 0.8 — Engine Wrapper + First Backtest (Day 20–22)
 
-The engine wrapper is the Python script that communicates with LEAN. It writes a config.json, launches LEAN as a subprocess, monitors the stdout, and reads the result JSON when complete. This is the AlgoLoop pattern.
+The engine wrapper is `trading-platform/run_backtest.py`. It has three functions:
+- `build_lean_config()` — writes `lean-results/lean-config.json` with all required LEAN keys
+- `run_backtest()` — launches `repos/Lean/Launcher/bin/Release/QuantConnect.Lean.Launcher.exe` as subprocess with `PYTHONNET_PYDLL` env var set to `python311.dll`
+- `parse_results()` — reads `lean-results/SpiderWaveAlgorithm.json`, returns sharpe/drawdown/return/trades
 
-The first working backtest milestone: `python run_backtest.py` produces a result JSON with equity curve, Sharpe ratio, max drawdown, trade list, and transaction costs. The numbers do not need to be good. They need to exist and be reproducible.
+**Critical implementation notes (from first run):**
+- Set `PYTHONNET_PYDLL=C:\...\Python311\python311.dll` in subprocess env — without this pythonnet cannot locate the runtime
+- LEAN result JSON uses lowercase keys: `statistics`, `charts` (not `Statistics`, `Charts`)
+- Statistics use key `Net Profit` (not `Total Net Profit`) and `Total Orders` (not `Total Trades`)
+- `python-venv` config key must point to `.venv311`, not `.venv`
+- `data-folder` must contain `symbol-properties/` and `market-hours/` subdirs (see Step 0.1)
+
+The first working backtest milestone: `python run_backtest.py` produces a result JSON with Sharpe ratio, max drawdown, net profit, and total orders. The numbers do not need to be good. They need to exist and be reproducible.
+
+**Phase 0 result recorded (2022-01-03 → 2024-12-31, 5 Nifty50 stocks, `Resolution.Daily`):**
+Sharpe −0.052 | MaxDD 18.6% | Net Profit 0.14% | Orders 226. Poor by design — daily data, SMA crossover, correlated universe. All fixed in Phase 1.
 
 ### Step 0.9 — Data Quality Checks (Day 23–24)
 
@@ -189,7 +358,7 @@ Before claiming Phase 0 complete, run automated data quality checks: no price ju
 
 The only UI in Phase 0 is a Streamlit app. It shows: download job progress (total / completed / failed), QuestDB row counts per symbol, last Bhavcopy download date, backtest results (equity curve chart, key metrics table), and LEAN engine status. This is not the real frontend. It is a developer tool to verify the foundation is working.
 
-**Phase 0 Milestone: `docker compose up`, run downloader, run backtest, open Streamlit, see equity curve. Everything works end-to-end.**
+**Phase 0 Milestone: start native local services (QuestDB + Redis + LEAN launcher), run downloader, run backtest, open Streamlit, see equity curve. Everything works end-to-end.**
 
 ---
 
@@ -201,13 +370,28 @@ Phase 1 is entirely about proving the strategy has a real edge before any live m
 
 ### Step 1.1 — In-Sample Backtest (Week 5)
 
+> **⚠️ Phase 0 problems this step fixes:**
+> - **`Resolution.Daily` broke the VWAP execution model.** Phase 0 ran on daily bars because only Bhavcopy (EOD) data existed. Intraday data (Step 0.4) is now available. Switch `main.py` to `Resolution.Minute`. VWAP execution becomes functional automatically — it requires sub-daily bars to compute the weighted average.
+> - **Only 5 correlated Nifty50 stocks** produced an undiversified portfolio and inflated drawdown. Expand the universe to the full F&O list (≈210 symbols) using the instrument master built in Step 0.2.
+
 Run Spider Wave on the F&O universe from 2019 to 2021. Optimize parameters using LEAN's built-in Grid Search and Euler Search optimizers. Record: best Sharpe, best parameter set, equity curve characteristics. The in-sample result is expected to look good because it was optimized on this period. The question is whether it stays good outside this period.
 
+**Checklist before running Step 1.1:**
+- [ ] `main.py` line 66: `Resolution.Daily` → `Resolution.Minute`
+- [ ] Universe expanded to full F&O list from instrument master
+- [ ] Intraday LEAN data files present in `lean-data/equity/india/minute/`
+
 ### Step 1.2 — Walk Forward Optimization (Week 6)
+
+> **⚠️ Phase 0 problem this step fixes:**
+> - **Wrong regime 2022–2024 for trend-following.** Phase 0 backtested 2022–2024 directly (choppy/bull regime — worst possible for SMA crossover trend-following). WFO discovers robust parameter ranges by testing across multiple sub-periods including 2019–2021 (better trending regimes). Track which parameter sets survive regime changes.
 
 Split the 2019–2021 period into rolling windows (e.g., 1 year in-sample, 6 months out-of-sample). Run optimization on each in-sample window, then test on the subsequent out-of-sample window. The WFO Sharpe should be meaningfully lower than the in-sample Sharpe. If it is near zero or negative in most windows, the strategy overfits.
 
 ### Step 1.3 — Monte Carlo Robustness Test (Week 7)
+
+> **⚠️ Phase 0 problem this step fixes:**
+> - **`MaximumDrawdownPercentPortfolio(0.05)` fired on normal noise.** The 5% portfolio drawdown limit was too tight for Phase 0's undiversified, daily-resolution strategy — it triggered frequently, forced premature exits, and re-entered at worse prices. Monte Carlo over 10,000 trade shuffles reveals the true drawdown distribution. Use the 95th-percentile max drawdown from Monte Carlo to set a realistic risk limit rather than an arbitrary 5%.
 
 The Monte Carlo test is from Davey's book. Take the list of individual trades from the best WFO run. Randomly shuffle the trade order 10,000 times. Compute Sharpe ratio for each shuffle. If the strategy has a real edge, at least 95% of shuffles should show positive Sharpe. If 40% of shuffles show negative Sharpe, the edge is dependent on lucky sequencing, not a real alpha.
 
@@ -215,13 +399,23 @@ This test is not built into LEAN. It is a Python post-processor that reads the t
 
 ### Step 1.4 — CPCV (Combinatorial Purged Cross-Validation) (Week 8)
 
+> **⚠️ Phase 0 problem this step fixes (continued from Step 1.3):**
+> - **Risk parameters tuned on a single period.** CPCV generates many non-overlapping test paths simultaneously. Use the CPCV drawdown distribution (not just Monte Carlo) to confirm the final `MaximumDrawdownPercentPortfolio` setting is grounded in statistical reality across all valid time-period combinations, not just a single backtest run.
+
 CPCV is from López de Prado's 2018 book. It is the mathematically correct cross-validation method for financial time series because it respects the time ordering of data and prevents data leakage from adjacent bars. The CPCV result gives a distribution of strategy performance across all valid test combinations. If the distribution is centered above zero with small variance, the strategy is robust.
 
 ### Step 1.5 — Out-of-Sample Test (Week 9)
 
+> **⚠️ Phase 0 problem this step confirms or rejects:**
+> - **2022–2024 was the phase 0 test period and produced Sharpe −0.052.** That result is now the baseline to beat. After WFO + Monte Carlo + CPCV, re-run on 2022–2024 with minute resolution and full F&O universe. If OOS Sharpe is still near zero: the SMA crossover has no edge in this regime and the alpha model must be redesigned before Step 1.6. If OOS Sharpe improves meaningfully: the poor Phase 0 result was caused by daily data + small universe, not a broken alpha.
+
 Run Spider Wave on 2022–2024, which was never touched during optimization. This is the true test. The out-of-sample Sharpe should be within a reasonable range of the WFO Sharpe. A collapse (e.g., WFO Sharpe 0.8, OOS Sharpe −0.3) means the strategy regime-shifted or overfitted despite WFO.
 
 ### Step 1.6 — Carver Position Sizing Integration (Week 10)
+
+> **⚠️ Phase 0 problem this step fixes:**
+> - **SMA 10/30 crossover is binary (fully in or fully out).** A signal either fires or does not — there is no gradation of conviction. In choppy 2022–2024 markets this caused whipsawing: the strategy entered at full size, got stopped out, then re-entered. Carver's forecast framework replaces the binary signal with a continuous value −20/+20 based on signal strength. Weak signals produce small positions; strong signals produce larger ones. This is what makes the system survive mixed regimes.
+> - **HRP over-allocated in Phase 0**, causing `Insufficient buying power` margin rejections in the LEAN log when all 5 correlated stocks triggered simultaneously at full size. Carver's instrument diversification multiplier (IDM) applied per symbol caps the combined position weight, preventing over-allocation.
 
 After validation passes, integrate the Carver forecast framework into the alpha model. Each signal is converted to a forecast value between −20 and +20 based on signal strength. The portfolio construction model uses this forecast to scale position sizes appropriately across instruments. This prevents the system from being 100% in one position when all 20 stocks signal simultaneously.
 
@@ -234,6 +428,9 @@ After validation passes, integrate the Carver forecast framework into the alpha 
 **Goal: Live paper trading on Dhan for 2 weeks with zero crashes**
 
 ### Step 2.1 — Dhan WebSocket Client
+
+> **⚠️ Phase 0 problem this step fixes:**
+> - **`DefaultBrokerageModel` does not match Dhan's margin rules.** Phase 0 used LEAN's default brokerage model which assumes exchange-standard SPAN margin. Dhan applies additional exposure margin and intraday leverage rules on top. This caused `Insufficient buying power` rejections even when capital was theoretically sufficient. This step implements `DhanBrokerageModel` (`brokers/dhan/brokerage_model.py`) with a real pre-margin check via Dhan's margin API before any order is sized. The pre-margin check queries Dhan's `/v2/margincalculator` endpoint with the proposed order and confirms sufficient balance before `run_backtest.py` or the live engine submits the order.
 
 The Dhan WebSocket gives live ticks for up to 1000 instruments per connection. The client must: connect at 9:15 AM, handle reconnection automatically if the connection drops, parse incoming binary tick data into {symbol, timestamp, ltp, bid, ask, volume, oi}, write each tick to QuestDB via ILP, and publish each tick to Redis pub/sub for frontend fan-out.
 
@@ -255,11 +452,387 @@ Run Spider Wave in LEAN's live mode connected to Dhan paper trading for 2 weeks.
 
 ---
 
-## PHASE 3 — FastAPI Backend + Core Agents
-**Duration: Weeks 17–22**  
-**Goal: REST API complete, 3 core agents working, Claude Desktop integration**
+## 🤖 Agent Architecture — Complete Design
 
-This phase is the first time the backend is truly built as an API. Until now, everything was scripts. Now it becomes a server.
+### Why this architecture (vs the original 9-agent flat list)
+
+The original plan had 9 agents as an unstructured flat list called independently. Three problems:
+
+1. **No routing** — you had to know which agent to call. The Supervisor solves this.
+2. **No inter-agent data flow** — MarketScan findings never reached WaveSignal. Memory solves this.
+3. **No strategy switching** — SpiderWave was hardcoded. RegimeDetector + StrategyRouter solves this.
+4. **No long-term portfolio handling** — algo trading and long-term investing are fundamentally different problems. PortfolioRebalancer solves this.
+
+Sources: Narang (ensemble alpha models), Davey (trading journal, automated validation), Jansen (feature engineering), López de Prado (causal validation), Carver (buffered rebalancing, volatility targeting), Harris + Durenard (OMS lifecycle, priority queues).
+
+---
+
+### The 19-Agent System
+
+```
+User / Claude Desktop / Frontend Chat
+              │
+         SUPERVISOR  (single entry point — reads request, routes to correct agent)
+              │
+  ┌───────────┼───────────────────────────────────────────────┐
+  │           │                                               │
+RESEARCH   ANALYSIS            DECISION           EXECUTION   MONITOR
+LAYER      LAYER               LAYER              LAYER       LAYER
+─────────  ──────────────────  ─────────────────  ─────────── ────────────
+MarketScan  RegimeDetector      StrategyRouter     OrderAssist RiskGuard
+NewsAnalyst FeatureEngineer     StrategyRegistry   JournalAgent RiskAnalyst
+Regulatory  ValidationPipeline  SpiderWaveAgent
+Watcher     CapacityAnalyst     MeanReversionAgent (future)
+            PortfolioRebalancer MomentumAgent      (future)
+                                OptionsIncomeAgent (future)
+                                StrategyAdvisor
+                                PortfolioCoach
+                                OptimizerAgent
+                                BacktestOrchestrator
+              │
+        MEMORY STORE
+  ─────────────────────────────────────────────────────
+  Thread memory   → current conversation context
+  Session memory  → today's trading day (SQLite checkpoint)
+  Long-term memory→ strategy performance history, preferences
+  Team memory     → shared: MarketScan writes → WaveSignal reads
+```
+
+---
+
+### Layer 1 — Research (runs 6:00–9:15 AM pre-market, LLM-powered)
+
+**MarketScan**
+Scans F&O universe for unusual OI buildup, IV anomalies, and wave signal confluence. Produces the daily pre-market briefing. Writes findings to team memory so WaveSignal and StrategyAdvisor can read them during the day without re-scanning.
+
+**NewsAnalyst**
+Reads overnight corporate announcements, earnings releases, and macro data for symbols in the current portfolio. Generates plain-language summaries relevant to open positions. Example: "RELIANCE earnings tonight — recommend reducing position by 30% before close."
+
+**RegulatoryWatcher** (pure Python scraper, no LLM)
+Scrapes NSE and SEBI circulars daily. Detects changes that affect: lot sizes, STT rates, margin requirements, expiry calendar. Auto-updates `config/fee_schedules.json` if rates changed. Flags anything requiring human review.
+
+---
+
+### Layer 2 — Analysis (runs nightly or on-demand, mostly pure Python)
+
+**RegimeDetector** (pure Python — HMM + VIX analysis)
+Classifies current market state using a Hidden Markov Model on Nifty OHLCV, India VIX level and direction, rolling Sharpe of each active strategy, and options PCR. Outputs:
+```python
+RegimeScore {
+    regime: "CHOPPY_BULL",          # TRENDING_BULL | TRENDING_BEAR | CHOPPY_BULL | HIGH_VOL_EVENT
+    confidence: 0.78,
+    strategy_weights: {
+        "spider_wave":      0.15,   # low — SMA crossover struggles in choppy markets
+        "mean_reversion":   0.55,   # high — range-bound favours mean reversion
+        "options_income":   0.30,   # medium — low VIX = good for premium selling
+    }
+}
+```
+Capital allocation changes **gradually** (Carver's principle — no cliff-edge switching). A strategy producing near-zero forecast gets near-zero capital. The transition from one regime to another takes 5–10 trading days.
+
+**FeatureEngineer** (pure Python — runs nightly)
+Manages the ML signal feature pipeline used by strategy agents. Converts time bars → dollar bars (Jansen: stationary features). Applies fractional differentiation to prices (preserves memory while achieving stationarity). Calculates feature importance using MDI/MDA methods. Flags and removes spurious features. Feeds clean features to SpiderWaveAgent and future ML-driven strategies.
+
+**ValidationPipeline** (pure Python — orchestrates LEAN, on-demand)
+Automates Davey's full 5-gate sequence in a single call. You trigger once, it runs all gates sequentially and returns a single PASS/FAIL report:
+```
+ValidationPipeline("SpiderWave", universe="fno", period="2019-2024")
+  Gate 1 → In-Sample backtest 2019-2021        → Sharpe 0.82   PASS
+  Gate 2 → Walk Forward Optimization            → WFO Sharpe 0.51 PASS
+  Gate 3 → Monte Carlo (10,000 shuffles)        → 96% positive  PASS
+  Gate 4 → CPCV                                 → Mean 0.44     PASS
+  Gate 5 → Out-of-Sample 2022-2024              → Sharpe 0.39   PASS
+  ─────────────────────────────────────────────────────────────
+  OVERALL: PASS — strategy approved for live trading
+```
+You still review and decide. The agent makes the **running** automatic, not the **decision**.
+
+**PortfolioRebalancer** (pure Python — runs weekly or on drift trigger)
+Manages long-term equity holdings (stocks bought for months/years — completely separate from algo trading). Implements three algorithms:
+
+*Algorithm 1 — Carver Buffered Target Position:*
+Target weight per stock = HRP weight × (current forecast / max_forecast). Buffer zone = ±3% around target. Only rebalances when drift exceeds buffer — prevents paying transaction costs on micro-movements. This reduces rebalancing trades by ~70% vs naive daily rebalancing.
+
+*Algorithm 2 — CPPI (Constant Proportion Portfolio Insurance):*
+$\text{Risky Allocation} = M \times (\text{Portfolio Value} - \text{Floor})$
+where M = multiplier (e.g., 3×), Floor = minimum value to protect. Market rises → cushion grows → more equity. Market falls → cushion shrinks → less equity. Automatically reduces risk exposure in drawdowns.
+
+*Algorithm 3 — Volatility Targeting (Carver):*
+$\text{Equity Exposure} = \frac{\text{Target Annual Vol}}{\text{Realised 30\text{-}day Vol}} \times \text{Capital}$
+India VIX low → increase equity. India VIX high → reduce equity. RegimeDetector output tightens the floor during HIGH_VOL_EVENT regimes.
+
+*India Tax Gate (mandatory):*
+- Never sell a position within 90 days of its 1-year LTCG threshold
+- Harvest losses before March 31 to offset gains
+- Time large LTCG realisations across financial years to use ₹1.25 lakh exemption
+
+Output is always a **proposal table** — never auto-executes:
+```
+Symbol     Action  Current%  Target%  Drift   Tax Note
+HDFC       HOLD    8.2%      7.8%     +0.4%   Within buffer — do nothing
+RELIANCE   BUY     5.1%      7.0%     -1.9%   Buy ₹47,450 worth
+INFY       SELL    12.3%     9.0%     +3.3%   ⚠ LTCG eligible in 45 days — DEFER
+TCS        SELL    11.8%     9.0%     +2.8%   LTCG eligible — safe to sell
+```
+
+**CapacityAnalyst** (pure Python)
+Estimates maximum capital that can trade the current strategy before slippage begins to erode returns. Key formula: capacity ≈ (daily volume × acceptable market impact %) × trading days. Example: "Spider Wave can trade up to ₹8 crore before slippage exceeds 15 bps per trade."
+
+---
+
+### Layer 3 — Decision (runs during and after market hours, mixed)
+
+**StrategyRouter** (pure Python — runs every 60 seconds during market hours)
+Takes RegimeDetector's latest weights and smoothly adjusts capital allocation across active strategies using Carver's gradual reweighting. Updates the `strategy_registry` SQLite table. Never makes LLM calls — pure weight arithmetic.
+
+**StrategyRegistry** (SQLite table, not an agent)
+Records: `strategy_id | name | regime_affinity | rolling_20d_sharpe | is_active | current_capital_weight`. New strategies register here. StrategyRouter reads this table. No code changes needed in Supervisor or PortfolioCoach when a new strategy is added.
+
+**SpiderWaveAgent** (LEAN strategy — runs inside LEAN engine)
+Multi-timeframe wave-following strategy. See Spider Wave documentation in strategies/spider-wave/. Standard interface: `run(universe, regime_context) → SignalList`. All strategy agents share this interface.
+
+**[Future] MeanReversionAgent, MomentumAgent, OptionsIncomeAgent**
+Each is a LEAN strategy + thin Python wrapper exposing the standard interface. Registered in StrategyRegistry. StrategyRouter assigns them capital based on regime. No other system changes needed.
+
+**StrategyAdvisor** (LLM-powered — on-demand)
+Explains StrategyRouter decisions in plain language. Example: "Why is the system running mostly mean reversion?" → reads RegimeDetector output and StrategyRegistry → explains in plain English why each strategy has its current weight and what would need to change to shift allocation.
+
+**PortfolioCoach** (LLM-powered — on-demand)
+Reviews overall portfolio health across both algo positions and long-term holdings: correlation between positions, concentration risk, days to expiry for options. Suggests rebalancing actions (PortfolioRebalancer executes them). The distinction: Coach *explains and recommends*, Rebalancer *calculates and proposes*.
+
+**OptimizerAgent** (pure Python — on-demand, offline)
+Accepts a strategy name and parameter space. Runs LEAN Grid Search (small spaces) or Euler Search (continuous). Runs Monte Carlo on the best result. Returns a ranked parameter heatmap. Feeds best parameters back to StrategyRegistry.
+
+**BacktestOrchestrator** (LLM entry + pure Python execution)
+Accepts natural language backtest requests. Translates to structured LEAN config. Launches `QuantConnect.Lean.Launcher.exe`. Waits for completion. Reads result JSON. Returns formatted statistics + equity curve. Primary interface: Claude Desktop via MCP.
+
+---
+
+### Layer 4 — Execution (on user action)
+
+**OrderAssist** (LLM-powered)
+Accepts natural language order descriptions. Translates to verified order parameters. Calls pre-margin check via broker API. Presents confirmation summary. Only sends to broker after explicit human approval. Never auto-executes.
+
+**JournalAgent** (pure Python — after every trade)
+Records each significant decision with full context to SQLite:
+```json
+{
+  "date": "2026-03-16",
+  "signal": "SpiderWave NIFTY — bullish alignment, forecast +14",
+  "regime": "TRENDING_BULL, confidence 0.82",
+  "strategy_weight": "0.65 (high — right regime)",
+  "agent_recommendation": "Buy 24200 CE debit spread",
+  "margin_confirmed": true,
+  "decision": "EXECUTED",
+  "outcome": "+₹8,400 (82% of max profit)",
+  "lessons": ""
+}
+```
+Queryable: "show all trades where I overrode the agent" or "what's the win rate when MarketScan flagged unusual OI buildup first?"
+
+---
+
+### Layer 5 — Monitor (always-on background, zero LLM, event-driven)
+
+**RiskGuard** (pure Python — event-driven, every tick)
+Hard real-time risk enforcement. Listens to Redis tick stream. On every position update computes live P&L and drawdown. At 3% portfolio drawdown: sends alert. At 5%: liquidates all positions immediately. Latency target: < 200ms from tick to action. **Never blocked by LLM calls. Never polls on a timer.** This is the only agent with authority to auto-execute without human confirmation (emergency stop only).
+
+**RiskAnalyst** (LLM-powered — on-demand only)
+Deep portfolio risk analysis requested by you. Computes: VaR, CVaR, Greeks exposure, correlation matrix, regime-adjusted stress test, days-to-expiry concentration. Completely separate from RiskGuard — never runs during market hours unless you specifically ask.
+
+---
+
+### Agent Time Schedule (from Durenard's priority queue principle)
+
+```
+06:00–09:15  Pre-market (research batch)
+    RegulatoryWatcher  — scrapes SEBI/NSE circulars
+    RegimeDetector     — recalculates regime from yesterday's close
+    MarketScan         — scans OI, IV, wave signals (1 LLM call for summary)
+    NewsAnalyst        — reads overnight announcements for held positions
+
+09:15–15:30  Market hours (MINIMAL agent activity)
+    RiskGuard          — event-driven every tick, ~0.1ms, pure Python
+    StrategyRouter     — recalculates weights every 60 seconds, pure Python
+    Supervisor         — only when you send a message
+    OrderAssist        — only when you type an order
+    ⚠ ALL OTHER AGENTS SLEEPING — no analytical LLM calls during market hours
+
+15:30–18:00  Post-market (daily batch)
+    FeatureEngineer    — rebuilds ML features with today's data
+    JournalAgent       — records today's trades
+    PortfolioRebalancer— checks drift against Carver buffer, generates proposal if needed
+
+Nightly / Weekend (heavy batch — only when triggered)
+    ValidationPipeline — multi-hour 5-gate test suite
+    OptimizerAgent     — parameter search across strategy space
+    BacktestOrchestrator — full historical backtest
+```
+
+---
+
+### Memory System
+
+All 19 agents share a single SQLite checkpoint store (`agents/memory.db`):
+
+| Scope | Contents | Lifetime |
+|---|---|---|
+| Thread memory | Current conversation context | Until conversation ends |
+| Session memory | Today's regime, MarketScan findings, open signals | Until market close |
+| Long-term memory | Backtest history, parameter versions, trade journal | Permanent |
+| Team memory | MarketScan → WaveSignal pipeline data | 24 hours rolling |
+
+Key property: agents are **lazy** — they exist in memory only when called, then garbage-collected. Between calls, only the SQLite state persists. Peak memory per agent call: ~100MB for 50–200ms, then freed. This is why 19 agents do not slow the system down.
+
+---
+
+### MCP Integration (Claude Desktop)
+
+The MCP server exposes **one tool: `trading_system`**. Claude calls it with natural language. The Supervisor routes internally. You never need to know which agent is handling the request.
+
+```
+Claude: "run Spider Wave backtest on BankNifty for last 3 years and optimize it"
+  → MCP → Supervisor → BacktestOrchestrator → LEAN → OptimizerAgent → formatted result
+  
+Claude: "what's the current regime and which strategies are active?"
+  → MCP → Supervisor → RegimeDetector (reads cached result) → StrategyAdvisor → explanation
+
+Claude: "rebalance my long-term portfolio"
+  → MCP → Supervisor → PortfolioRebalancer → proposal table (awaits your confirmation)
+```
+
+---
+
+## PHASE MAINTENANCE — Operational Hardening  
+**Timeline: After Phase 2 (weeks 17+)**  
+**Goal: Production-grade operational tasks, automation, and monitoring**
+
+These are non-critical for Phase 0→1→2 validation but essential for production deployment. They should be scheduled into sprints after the main feature phases are complete.
+
+### Maintenance Task M1 — Liquidity Classifier + Universe Auto-Discovery
+
+**Purpose**: Automatically detect new liquid stocks as they list and filter illiquid symbols before download.
+
+**Why it matters**: In production, the app should not download all 2,460 NSE stocks (most are illiquid). Instead, it should:
+1. Weekly monitor NSE FO contracts for new underlyings (auto-discover newly listed stocks with derivatives)
+2. Validate each new stock meets liquidity thresholds (Bhavcopy volume > 100k/day, intraday bars > 10/hour, price > ₹50)
+3. Remove delistings and suspended companies automatically
+4. Maintain `approved_universe.csv` that `intraday_downloader.py` reads
+
+**Implementation**:
+```python
+# New module: data-pipeline/liquidity_classifier.py
+def discover_new_liquid_stocks():
+    """Weekly job: scan NSE FO contracts for new underlyings"""
+    fresh_contracts = download_nse_instrument_master()
+    new_underlyings = extract_new_contracts(fresh_contracts, old_contracts)
+    
+    for stock in new_underlyings:
+        avg_vol = get_bhavcopy_volume(stock, days=5)
+        intraday_bars_per_hour = sample_dhan_intraday(stock, hours=1)
+        price_level = get_bhavcopy_close(stock)
+        
+        if avg_vol > 100000 and intraday_bars_per_hour >= 10 and price_level > 50:
+            approved_universe.add(stock)
+            schedule_download(stock, start_date=2024-01-01)
+
+def remove_dead_stocks():
+    """Weekly job: remove delistings and illiquid stocks"""
+    delistings = query_nse_corporate_actions(type="DELISTING")
+    
+    for stock in current_universe:
+        try:
+            dhan_data = fetch_dhan_1min(stock, date.today(), 1)
+            if len(dhan_data) == 0:
+                universe.remove(stock)  # No data = delisted or suspended
+        except DhanException as e:
+            if "invalid security" in str(e):
+                universe.remove(stock)
+```
+
+**Deliverables**:
+- `liquidity_classifier.py` — 300 lines, metrics computation
+- `approved_universe.csv` — updated weekly, consumed by `intraday_downloader.py`
+- Workflow: NSE FO scan (weekly 6 AM) → validate volume + bars → update approved universe
+- Tests: validate new-stock detection, removal of dead symbols, no false positives
+
+**Effort**: 1 week (Phase Maintenance Sprint 1)
+
+**Used by**: Phase 1+ backtests (feeds cleaner universe), Phase 3+ production deployment (only downloads liquid stocks)
+
+---
+
+### Maintenance Task M2 — Streamlit Dashboard v2 (Live Metrics)
+
+**Current state** (Phase 0): Dashboard shows download progress, QuestDB row counts, backtest results.
+
+**Needed for production**: Add live trading metrics during market hours: current positions, live P&L, today's trades executed, daily log of agent decisions, RiskGuard status.
+
+**Dashboard sections**:
+1. Download Progress (existing) — jobs completed/failed/pending
+2. Data Status — last Bhavcopy date, last QuestDB ingest, min/max quote symbols
+3. Backtest Results (existing) — last backtest equity curve
+4. **[NEW] Live Positions** — stocks held, current price, P&L, Greek exposure (if options)
+5. **[NEW] Current P&L** — total realized + unrealized, daily gain/loss chart
+6. **[NEW] Today's Trades** — trade table with entry/exit prices, P&L per trade
+7. **[NEW] Agent Log** — recent RegimeDetector regime change, StrategyRouter weight shifts, WaveSignal alerts
+8. **[NEW] RiskGuard Status** — current portfolio drawdown %, max allowed %, next alert level
+
+**Effort**: 1 week (Phase Maintenance Sprint 1)
+
+**Used by**: Developer/trader monitoring during Phase 2 paper trading and Phase 3+ live trading
+
+---
+
+### Maintenance Task M3 — Monitoring Infrastructure (Prometheus + Grafana)
+
+**Purpose**: Production-grade metrics collection and alerting.
+
+**What to monitor**:
+- Downloader: jobs/sec, failed job rate, API quota usage, last successful run time
+- QuestDB: rows/sec ingestion, query latency p50/p95/p99
+- WebSocket: connected clients, ticks/sec per symbol, connection drops/recoveries
+- LEAN: backtest execution time, process memory, Python GC pauses
+- Broker API: call latency, errors per endpoint, token refresh status
+- Agents: LLM token usage, agent latency, memory per agent
+
+**Deliverables**:
+- `monitoring/prometheus-config.yml` — Prometheus scrape endpoints
+- `monitoring/grafana-dashboards/` — 5 dashboards (data, engine, trading, agents, system)
+- Alerting rules: page when downloader fails > 3 consecutive times, alert when WebSocket latency > 500ms
+
+**Effort**: 2 weeks (Phase Maintenance Sprint 2)
+
+**Used by**: Production operations (Phase 3+)
+
+---
+
+### Maintenance Task M4 — Backup + Disaster Recovery
+
+**What to back up**:
+- `instrument-master/` SQLite databases (symbol maps, lot sizes, fee schedules)
+- `lean-data/` OHLCV archives (terabytes)
+- Backtest results JSON
+- Trading journal and trade records
+- Agent configuration and strategy parameters
+
+**Backup strategy**:
+- Incremental daily backups to NAS/cloud (S3)
+- Full backup weekly
+- Point-in-time recovery for instrument-master (SQLite backup + WAL logs)
+- Test restore quarterly
+
+**Effort**: 1 week (Phase Maintenance Sprint 2)
+
+**Used by**: Production operations (Phase 3+)
+
+---
+
+
+**Duration: Weeks 17–22**
+**Goal: REST API complete, Supervisor + 5 core agents working, Claude Desktop integration**
+
+This phase is the first time the backend is truly built as an API. Until now, everything was scripts. Now it becomes a server. The agent system is also wired up here — infrastructure first, then agents on top.
 
 ### Step 3.1 — FastAPI Application Structure
 
@@ -271,7 +844,7 @@ The backtest endpoints accept strategy parameters and date range, launch a LEAN 
 
 The live trading endpoints show current positions, pending orders, order history, and account balance from Dhan.
 
-The agent endpoints accept natural language queries and return agent responses asynchronously.
+The agent endpoints accept natural language queries and return agent responses asynchronously via streaming (LangGraph supports streaming tokens).
 
 The WebSocket endpoint broadcasts live ticks to connected frontend clients. This is the single WebSocket connection the frontend maintains for all live data.
 
@@ -283,27 +856,31 @@ When the frontend opens a WebSocket connection to the FastAPI server, it subscri
 
 The key design constraint: the frontend must never connect directly to the broker WebSocket. All broker connections are server-side. The frontend connects only to the FastAPI WebSocket. This keeps broker credentials server-side and allows the server to be the single source of truth.
 
-### Step 3.3 — BacktestOrchestrator Agent
+### Step 3.3 — Supervisor Agent + Memory Store
 
-The BacktestOrchestrator is a LangGraph agent that accepts natural language like "run Spider Wave on NIFTY for the last 3 years with Euler optimization" and translates it into a structured backtest request. It submits the request to the LEAN engine wrapper, waits for completion, then formats the results into a readable report with key statistics.
+The Supervisor is the single entry point for all agent interactions. It reads every request (from frontend chat, MCP, or API), classifies the intent, and routes to the correct specialist agent. It never handles domain logic itself — only routing.
 
-This agent is what powers the natural language backtest interface in the frontend and in Claude Desktop via MCP.
+The SQLite memory store (`agents/memory.db`) is initialised here using LangGraph's `SqliteSaver` checkpointer. All agents in all subsequent phases write to and read from this store. Thread/session/long-term/team scopes are defined here.
 
-### Step 3.4 — RiskMonitor Agent
+### Step 3.4 — RiskGuard + StrategyRouter (always-on processes)
 
-The RiskMonitor is a background task that runs every 60 seconds during market hours. It reads current positions from Dhan, computes the live P&L and drawdown, compares against the thresholds (3% alert, 5% hard stop), sends alerts if thresholds are breached, and triggers automatic position liquidation at the 5% hard stop.
+**RiskGuard** is started as a background asyncio task when the FastAPI server starts. It subscribes to the Redis tick stream. On every position update it computes live P&L and drawdown. At 3% portfolio drawdown it sends an alert via WebSocket to the frontend. At 5% it calls the emergency liquidation endpoint. Latency target < 200ms. It never makes LLM calls. It never polls a database.
 
-The RiskMonitor must be restartable: if it crashes, it resumes monitoring immediately on restart without losing position state.
+**StrategyRouter** runs as a separate 60-second scheduler task. It reads RegimeDetector's latest cached output from the memory store, recalculates strategy capital weights, and updates the `strategy_registry` table. No LLM involvement.
 
-### Step 3.5 — OptimizerAgent
+### Step 3.5 — BacktestOrchestrator + OptimizerAgent
 
-The OptimizerAgent accepts a strategy name and a parameter space description and runs the LEAN optimizer (Grid Search for small spaces, Euler Search for continuous spaces) and returns a ranked parameter heatmap. It also runs the Monte Carlo test on the best result before reporting.
+**BacktestOrchestrator**: LangGraph agent that accepts natural language backtest requests. Translates to a structured LEAN config, launches `QuantConnect.Lean.Launcher.exe`, waits for completion, reads result JSON, returns formatted statistics and equity curve data.
+
+**OptimizerAgent**: Accepts a strategy name and parameter space. Runs LEAN Grid Search or Euler Search. Runs Monte Carlo on the best result. Returns ranked parameter heatmap. Stores best parameters in the `strategy_registry` SQLite table.
+
+Both agents use LangGraph's `SqliteSaver` checkpointer — if a backtest or optimisation run is interrupted, it resumes from the last checkpoint rather than restarting from scratch.
 
 ### Step 3.6 — MCP Server
 
-The MCP server is a FastMCP wrapper around the BacktestOrchestrator, RiskMonitor, and OptimizerAgent. It exposes them as tools that Claude Desktop can call. The MCP server config file is committed to the repo so anyone can add it to their Claude Desktop in one step.
+The MCP server is a FastMCP wrapper that exposes a single tool: `trading_system`. The Supervisor receives every call and routes internally. The MCP server config file is committed to the repo. Adding it to Claude Desktop is one JSON entry.
 
-**Phase 3 Milestone: "Run Spider Wave backtest on NIFTY for 3 years with optimization" works from Claude Desktop in under 10 minutes.**
+**Phase 3 Milestone: "Run Spider Wave backtest on NIFTY for 3 years and optimize it" works from Claude Desktop in under 10 minutes. RiskGuard is live and tested to trigger at 5% drawdown.**
 
 ---
 
@@ -331,13 +908,17 @@ The backend computes Greeks using the Black-Scholes formula on each tick update.
 
 The OI analysis module computes put-call ratio, max pain strike, and unusual OI concentration. These are key inputs for options traders and are displayed prominently in the options screen.
 
-### Step 4.4 — WaveSignal and StrategyAdvisor Agents
+### Step 4.4 — SpiderWaveAgent, StrategyRegistry, RegimeDetector, StrategyAdvisor
 
-The WaveSignal agent analyses the Spider MTF wave hierarchy for an underlying and recommends a corresponding options structure. If the wave is in a "Grandmother Up / Mother Up / Son Up" alignment, the agent recommends a bullish debit spread. If waves are mixed, it recommends a neutral iron condor.
+**SpiderWaveAgent** is the first registered strategy in `StrategyRegistry`. It implements the standard strategy interface: `run(universe, regime_context) → SignalList`. The regime context is a dict produced by RegimeDetector containing the current regime label, confidence, and suggested capital weights. SpiderWaveAgent uses the MTF wave hierarchy for signal generation and notes the regime context when it applies an IV filter (no debit spreads when VIX > 20 and regime is `HIGH_VOL_EVENT`).
 
-The StrategyAdvisor agent takes a directional view ("slightly bullish on NIFTY, low IV environment") and recommends specific strike selection for the appropriate strategy, showing the risk/reward profile and required margin.
+**StrategyRegistry** is a SQLite table with columns: `strategy_id`, `name`, `regime_affinity` (JSON mapping regime→fit score 0–1), `rolling_sharpe` (30-day realised), `enabled`, `capital_weight`. StrategyRouter reads from this table every 60 seconds and updates `capital_weight` based on the product of `regime_affinity[current_regime]` × `rolling_sharpe`, normalised to sum to 1.0. This is Carver's gradual reweighting — no hard switches.
 
-**Phase 4 Milestone: Select, analyse, and paper trade an options strategy based on agent recommendations using live Dhan option chain data.**
+**RegimeDetector** is built here as a standalone component. It runs an HMM on Nifty50 OHLCV + VIX (loaded from QuestDB) and emits one of four regime labels: `TRENDING_BULL`, `TRENDING_BEAR`, `CHOPPY_BULL`, `HIGH_VOL_EVENT`. Output is cached to the team memory store with a 6-hour TTL. All agents that need regime context read from cache — they never retrigger the HMM.
+
+**StrategyAdvisor** (LLM agent) explains StrategyRouter decisions in plain language: why did capital shift from SpiderWave to MeanReversion, which regime caused it, what conditions would reverse the shift.
+
+**Phase 4 Milestone: StrategyRouter is live. Add a second stub strategy to StrategyRegistry and watch capital weights shift in real time as RegimeDetector changes regime. StrategyAdvisor explains every weight change in plain English.**
 
 ---
 
@@ -361,21 +942,30 @@ Upstox API is free (no monthly subscription). The WebSocket uses Protobuf encodi
 
 Both provide standard REST + WebSocket APIs with Python SDKs. Angel One provides the SmartAPI with margin calculator. Fyers provides options chain data and historical data similar to Dhan.
 
-### Step 5.5 — Remaining 6 Agents
+### Step 5.5 — Remaining Agents (complete the 19-agent system)
 
-The NewsAnalyst agent monitors NSE corporate announcements, earnings releases, and macro data for symbols in the current portfolio and generates natural language summaries relevant to open positions.
+**PortfolioRebalancer** is the most algorithmically complex agent. It runs nightly or on demand. Given current holdings and the latest regime context, it produces a proposed rebalancing table (symbol, current weight, target weight, action, estimated tax impact). It applies four algorithms in sequence:
 
-The OrderAssist agent accepts natural language order descriptions ("buy 2 lots NIFTY 24000 CE expiring next Thursday at market") and translates them into verified order parameters before execution.
+1. **Carver Buffer**: target weight ± 3% deadband. Only trade when drift exits the buffer. Saves ~70% of transaction costs versus constant rebalancing.
+2. **CPPI Floor**: risky exposure = multiplier × (portfolio value − floor). Automatically reduces equity allocation as portfolio falls, restores as it recovers.
+3. **Volatility Targeting**: equity allocation = (target volatility / realised 30-day volatility) × capital. When VIX spikes, equity shrinks automatically.
+4. **India Tax Gate**: defer any sell where the holding crosses from STCG (<1 year, taxed at 20%) to LTCG (>1 year, taxed at 12.5%) within the next 90 days. Harvest offsetting losses before March 31.
 
-The MarketScan agent screens the F&O universe for unusual OI buildup, IV anomalies, and wave signal confluence and produces a daily pre-market briefing.
+PortfolioRebalancer produces a table — it never executes. OrderAssist executes after explicit human confirmation.
 
-The PortfolioCoach agent reviews overall portfolio health: correlation between positions, concentration risk, days until expiry for options, and suggests rebalancing actions.
+**PortfolioCoach** (LLM) explains portfolio health in plain language: correlation between positions, concentration risk, days until expiry for options, and interprets the PortfolioRebalancer proposal in terms a non-quant can act on.
 
-The CapacityAnalyst agent estimates maximum capital that can trade the current strategy before slippage begins to erode returns — the answer for "how large can this strategy scale."
+**JournalAgent** records every trade decision: signal generated → regime at signal time → agent recommendation → human decision → execution outcome. QueryableL from Claude Desktop: "show me all trades where RegimeDetector was wrong."
 
-The RegularitoryWatcher agent summarises new SEBI and NSE circulars daily, flags anything affecting open positions or strategy parameters, and updates the fee model if charges changed.
+**FeatureEngineer** produces ML-ready features for any strategy that needs them: converts time bars to dollar bars (removing time-based sampling bias), applies fractional differentiation (Jansen) to make price series stationary while preserving memory, and runs MDI/MDA feature importance to prune irrelevant inputs before model training.
 
-**Phase 5 Milestone: Drop-down broker selector works. All 9 agents operational. Switch from Dhan to Zerodha in one click with zero code change.**
+**ValidationPipeline** automates Davey's 5-gate sequence in one call: In-Sample → Walk-Forward Optimisation → Monte Carlo → Combinatorial Purged Cross-Validation (CPCV) → Out-of-Sample. Returns a pass/fail verdict with the weakest gate highlighted.
+
+**CapacityAnalyst** estimates maximum capital before slippage erodes returns, answers "how large can SpiderWave scale on NSE."
+
+**RegulatoryWatcher** (pure Python, no LLM) scrapes SEBI/NSE circulars daily, auto-updates `config/fee_schedules.json` when charges change, flags circulars affecting open positions to the Supervisor.
+
+**Phase 5 Milestone: Drop-down broker selector works. All 19 agents operational. PortfolioRebalancer produces a nightly rebalancing table with tax impact. Switch from Dhan to Zerodha in one click with zero code change.**
 
 ---
 
@@ -523,11 +1113,11 @@ The broker configuration screen is particularly important: it must never show AP
 **Duration: Weeks 53–56**  
 **Goal: One-command setup, documentation, community**
 
-### Step 8.1 — Docker Compose Production Setup
+### Step 8.1 — Native Production Deployment Setup (No Docker)
 
-The production docker-compose.yml brings up all services: LEAN engine, QuestDB, Redis, FastAPI backend, Next.js frontend, Nginx reverse proxy, and Certbot for HTTPS. A single command `docker compose up -d` starts the entire platform on any Linux machine with Docker installed.
+Production deployment follows the same no-Docker architecture used in development: LEAN launcher, QuestDB, Redis, FastAPI backend, and Next.js frontend run as native services. Use Windows service wrappers (or systemd on Linux) with automatic restart policies, startup ordering, and health checks.
 
-Environment variables for secrets are managed via a .env.example template. The README makes it clear where to put API keys and how to run the daily token refresh.
+Reverse proxy and TLS are configured with Nginx/Caddy. Environment variables for secrets are managed via a `.env.example` template and per-host secure `.env` files. Documentation must include start/stop scripts, service recovery, backup/restore, and token refresh operations.
 
 ### Step 8.2 — Documentation
 
@@ -590,25 +1180,23 @@ Create the GitHub release with a changelog. Set up a Discord server for communit
 | SEBI rule changes | Daily hash-diff monitor + versioned fee model |
 | Lot size changes in backtests | lot_size_history table with date ranges |
 | EOD download for 9000 stocks | NSE Bhavcopy (1 file per day = all stocks); never per-symbol API |
-| Intraday download for 200 stocks | SQLite job queue, resumable, 8 req/sec rate limiter |
+| Intraday download for mapped FnO underlyings | SQLite job queue, resumable, 75-day windows, parallel workers with shared 8 req/sec token bucket |
 
 ---
 
 ## 🔢 What to Build Right Now
 
-The first 5 days in strict order:
+Current execution order from where the project is now:
 
-Day 1: docker-compose.yml with LEAN + QuestDB + Redis. Run `docker compose up` and confirm all three start and can ping each other.
+1. Finish Step 0.4 queue drain: run intraday downloader until pending is zero and failed is either zero or explicitly re-run/reconciled.
 
-Day 2: instrument-master/schema.sql and dhan_parser.py. Download the Dhan instrument master CSV. Parse it. Load it into SQLite. Print how many rows were loaded.
+2. Run Step 0.5 writer end-to-end on latest downloaded minute data and verify expected LEAN zip output structure under `lean-data/equity/india/minute/`.
 
-Day 3: bhavcopy_downloader.py. Download yesterday's NSE equity bhavcopy. Parse it. Insert it into QuestDB. Query QuestDB and verify 2000+ rows exist.
+3. Run Step 0.9 quality checks and confirm `lean-data/quality_report.json` passes all critical checks (format, gaps, zero/negative anomalies).
 
-Day 4: symbol-mapper/universal_mapper.py. Given "NIFTY" as a string, look up the Dhan security_id. Map it to a LEAN Symbol. Map it back. Print both. Confirm they round-trip correctly.
+4. Run Step 0.8 backtest again on refreshed minute data baseline and record reproducible metrics snapshot.
 
-Day 5: data-pipeline/lean_writer.py. Query QuestDB for NIFTY's last 30 days of daily OHLCV. Write it in LEAN zip format to /Data/equity/india/daily/nifty/. Confirm the file is valid by running a minimal LEAN backtest that reads it.
-
-When Day 5 works, the foundation is real and Phase 0 becomes engineering rather than exploration.
+5. Lock Phase 0 milestone: native services startup sequence + downloader + writer + backtest + Streamlit dashboard all passing in one checklist run.
 
 ---
 

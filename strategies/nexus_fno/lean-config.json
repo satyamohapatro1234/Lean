@@ -1,0 +1,36 @@
+{
+    "algorithm-type-name": "NexusFnOStrategy",
+    "algorithm-language": "Python",
+    "algorithm-location": "strategies/nexus_fno/main.py",
+
+    "data-folder": "lean-data",
+    "results-destination-folder": "lean-results",
+
+    "environment": "backtesting",
+
+    "parameters": {
+        "symbol":          "SBIN",
+        "risk_pct":        "1.5",
+        "atr_len":         "14",
+        "atr_sl_norm":     "1.2",
+        "atr_sl_high":     "2.0",
+        "atr_trail":       "2.0",
+        "min_rr":          "1.5",
+        "min_score_long":  "6",
+        "min_score_short": "6",
+        "swing_len":       "10",
+        "ob_len":          "5",
+        "liq_margin":      "1.45",
+        "min_range_ratio": "0.70"
+    },
+
+    "_notes": {
+        "lot_sizes_post_dec_2024": {
+            "NIFTY": 25, "BANKNIFTY": 30, "FINNIFTY": 40,
+            "SBIN": 1500, "RELIANCE": 250, "HDFCBANK": 550
+        },
+        "expiry": "Strategy auto-exits 2 days before last Thursday of month",
+        "shorts":  "Shorts simulate futures. Replace add_equity with add_future when data is ready.",
+        "run":     "python engine-wrapper/run_backtest.py --config strategies/nexus_fno/lean-config.json"
+    }
+}

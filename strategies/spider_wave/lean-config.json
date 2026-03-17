@@ -1,0 +1,36 @@
+{
+    "algorithm-type-name": "SpiderWaveAlgorithm",
+    "algorithm-language": "Python",
+    "algorithm-location": "strategies/spider_wave/main.py",
+
+    "data-folder": "lean-data",
+    "results-destination-folder": "lean-results",
+
+    "environment": "backtesting",
+    "log-handler": "QuantConnect.Logging.CompositeLogHandler",
+    "messaging-handler": "QuantConnect.Messaging.Messaging",
+    "job-queue-handler": "QuantConnect.Queues.JobQueue",
+    "api-handler": "QuantConnect.Api.Api",
+
+    "maximum-warmup-history-days-look-back": 500,
+    "maximum-data-points-per-chart-series": 4000,
+
+    "parameters": {
+        "symbol":          "SBIN",
+        "risk_pct":        "1.0",
+        "atr_len":         "14",
+        "atr_mult_norm":   "1.5",
+        "atr_mult_high":   "2.5",
+        "atr_mult_trail":  "2.0"
+    },
+
+    "_comments": {
+        "symbol":          "NSE symbol — change to NIFTY, RELIANCE, HDFC, etc.",
+        "risk_pct":        "Risk per trade as % of equity (e.g. 1.0 = 1%)",
+        "atr_mult_norm":   "ATR stop multiplier in normal volatility",
+        "atr_mult_high":   "ATR stop multiplier when daily ATR > 6M avg × 1.3",
+        "atr_mult_trail":  "Chandelier trailing stop multiplier",
+        "LEAN_NOTE":       "Python 3.11 required — use .venv311, not .venv (3.14)",
+        "RUN_COMMAND":     "python engine-wrapper/run_backtest.py --config strategies/spider_wave/lean-config.json"
+    }
+}
